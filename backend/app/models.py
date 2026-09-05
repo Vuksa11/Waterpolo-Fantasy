@@ -1,0 +1,346 @@
+"""
+SQLAlchemy models matching docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 5.1.
+
+Polymorphic entity references (roster/lineup/fantasy_score/transfer_history/price_history
+slots that can point at either a Player or a Coach) use an (entity_type, entity_id) pair
+instead of two nullable FKs, per the original v1 architecture decision (Section 6.2 of the
+v1 document). PostgreSQL cannot enforce referential integrity across the polymorphic
+boundary — orphan prevention is the application's responsibility.
+"""
+
+import enum
+import uuid
+from datetime import date, datetime
+
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+)
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+def uuid_pk() -> Mapped[uuid.UUID]:
+    return mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+
+# --- Enums --------------------------------------------------------------
+
+class Position(str, enum.Enum):
+    GK = "GK"
+    OT = "OT"
+    CF = "CF"
+    CB = "CB"
+
+
+class SeasonStatus(str, enum.Enum):
+    UPCOMING = "UPCOMING"
+    ACTIVE = "ACTIVE"
+    FINISHED = "FINISHED"
+
+
+class MatchdayStatus(str, enum.Enum):
+    UPCOMING = "UPCOMING"
+    ACTIVE = "ACTIVE"
+    FINISHED = "FINISHED"
+
+
+class MatchStatus(str, enum.Enum):
+    UPCOMING = "UPCOMING"
+    LIVE = "LIVE"
+    FINISHED = "FINISHED"
+
+
+class LeagueVisibility(str, enum.Enum):
+    PRIVATE = "PRIVATE"
+    PUBLIC = "PUBLIC"
+
+
+class Formation(str, enum.Enum):
+    THREE_THREE = "THREE_THREE"
+    FOUR_TWO = "FOUR_TWO"
+    TWO_FOUR = "TWO_FOUR"
+
+
+class EntityType(str, enum.Enum):
+    PLAYER = "PLAYER"
+    COACH = "COACH"
+
+
+class Slot(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    BENCH = "BENCH"
+
+
+class SlotRole(str, enum.Enum):
+    GK = "GK"
+    OT = "OT"
+    CF = "CF"
+    CB = "CB"
+    CF_CB = "CF_CB"
+
+
+class CoachResult(str, enum.Enum):
+    WIN = "WIN"
+    DRAW = "DRAW"
+    LOSS = "LOSS"
+
+
+class TransferAction(str, enum.Enum):
+    BUY = "BUY"
+    SELL = "SELL"
+
+
+# --- Core entities --------------------------------------------------------
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(String)
+    google_id: Mapped[str | None] = mapped_column(String)
+    display_name: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class Competition(Base):
+    """One of the three real-world leagues: Regionalna liga, Super liga Srbije, Prva liga Srbije."""
+
+    __tablename__ = "competitions"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    source_slug: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+
+
+class Season(Base):
+    __tablename__ = "seasons"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    competition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("competitions.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[SeasonStatus] = mapped_column(Enum(SeasonStatus, name="season_status"), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+
+class Matchday(Base):
+    __tablename__ = "matchdays"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    season_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("seasons.id"), nullable=False)
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[MatchdayStatus] = mapped_column(Enum(MatchdayStatus, name="matchday_status"), nullable=False)
+
+
+class Match(Base):
+    __tablename__ = "matches"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    matchday_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matchdays.id"), nullable=False)
+    external_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    home_club: Mapped[str] = mapped_column(String, nullable=False)
+    away_club: Mapped[str] = mapped_column(String, nullable=False)
+    home_score: Mapped[int | None] = mapped_column(Integer)
+    away_score: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[MatchStatus] = mapped_column(Enum(MatchStatus, name="match_status"), nullable=False)
+    kickoff_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class Player(Base):
+    __tablename__ = "players"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    competition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("competitions.id"), nullable=False)
+    external_id: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    position: Mapped[Position] = mapped_column(Enum(Position, name="position"), nullable=False)
+    real_club: Mapped[str] = mapped_column(String, nullable=False)
+    current_cost: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=7)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class Coach(Base):
+    __tablename__ = "coaches"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    competition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("competitions.id"), nullable=False)
+    external_id: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    real_club: Mapped[str] = mapped_column(String, nullable=False)
+    current_cost: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=7)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class League(Base):
+    """
+    Fantasy league (not to be confused with Competition, the real-world league).
+    In v1, exactly one row per (season_id) is created by the platform: admin_id
+    is NULL and visibility is PUBLIC. The schema already supports user-created
+    leagues (per v1 doc) for a future version — no migration needed to enable it.
+    """
+
+    __tablename__ = "leagues"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    season_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("seasons.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    visibility: Mapped[LeagueVisibility] = mapped_column(
+        Enum(LeagueVisibility, name="league_visibility"), nullable=False, default=LeagueVisibility.PUBLIC
+    )
+    invite_code: Mapped[str | None] = mapped_column(String, unique=True)
+    admin_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class FantasyTeam(Base):
+    __tablename__ = "fantasy_teams"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    league_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("leagues.id"), nullable=False)
+    season_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("seasons.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    credit_balance: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False, default=100)
+    total_points: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False, default=0)
+    wildcard_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class Roster(Base):
+    """A player or coach slot on a fantasy team. Polymorphic entity reference."""
+
+    __tablename__ = "rosters"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    fantasy_team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("fantasy_teams.id"), nullable=False)
+    entity_type: Mapped[EntityType] = mapped_column(Enum(EntityType, name="entity_type"), nullable=False)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    purchase_price: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    acquired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class Lineup(Base):
+    """One slot in a fantasy team's lineup for a specific matchday. Polymorphic entity reference."""
+
+    __tablename__ = "lineups"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    fantasy_team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("fantasy_teams.id"), nullable=False)
+    matchday_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matchdays.id"), nullable=False)
+    formation: Mapped[Formation] = mapped_column(Enum(Formation, name="formation"), nullable=False)
+    entity_type: Mapped[EntityType] = mapped_column(Enum(EntityType, name="entity_type"), nullable=False)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    slot: Mapped[Slot] = mapped_column(Enum(Slot, name="slot"), nullable=False)
+    slot_role: Mapped[SlotRole] = mapped_column(Enum(SlotRole, name="slot_role"), nullable=False)
+    is_captain: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class PlayerStat(Base):
+    """Raw per-player statistics per match, scraped from totalwaterpolo.com."""
+
+    __tablename__ = "player_stats"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    match_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matches.id"), nullable=False)
+    player_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("players.id"), nullable=False)
+    goals: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    assists: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    fouls_drawn: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    steals: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    blocks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    swimoffs_won: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    misses: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    personal_fouls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    turnovers: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    offensive_fouls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    saves: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    goals_conceded: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class CoachStat(Base):
+    """Pre-calculated per-coach statistics per match."""
+
+    __tablename__ = "coach_stats"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    match_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matches.id"), nullable=False)
+    coach_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("coaches.id"), nullable=False)
+    goals_for: Mapped[int] = mapped_column(Integer, nullable=False)
+    goals_against: Mapped[int] = mapped_column(Integer, nullable=False)
+    result: Mapped[CoachResult] = mapped_column(Enum(CoachResult, name="coach_result"), nullable=False)
+    fantasy_points: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class FantasyScore(Base):
+    """Calculated fantasy points per player or coach per matchday. Polymorphic entity reference."""
+
+    __tablename__ = "fantasy_scores"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    matchday_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matchdays.id"), nullable=False)
+    entity_type: Mapped[EntityType] = mapped_column(Enum(EntityType, name="entity_type"), nullable=False)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    raw_points: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False)
+    final_points: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False)
+    is_finalized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class TransferHistoryEntry(Base):
+    """Append-only audit log of every transfer. Never updated or deleted. Polymorphic entity reference."""
+
+    __tablename__ = "transfer_history"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    fantasy_team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("fantasy_teams.id"), nullable=False)
+    matchday_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matchdays.id"), nullable=False)
+    action: Mapped[TransferAction] = mapped_column(Enum(TransferAction, name="transfer_action"), nullable=False)
+    entity_type: Mapped[EntityType] = mapped_column(Enum(EntityType, name="entity_type"), nullable=False)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    price: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    credit_balance_after: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False)
+    is_wildcard: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class PriceHistoryEntry(Base):
+    """Log of player/coach credit cost changes between matchdays. Polymorphic entity reference."""
+
+    __tablename__ = "price_history"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    entity_type: Mapped[EntityType] = mapped_column(Enum(EntityType, name="entity_type"), nullable=False)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    matchday_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matchdays.id"), nullable=False)
+    old_cost: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    new_cost: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class ScrapeRun(Base):
+    """Operational log for the scraper (docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 4.2)."""
+
+    __tablename__ = "scrape_runs"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    matches_processed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    notes: Mapped[str | None] = mapped_column(Text)

@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: waterpolo
+      POSTGRES_PASSWORD: waterpolo
+      POSTGRES_DB: waterpolo_fantasy
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+  scraper:
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    env_file: .env
+    depends_on:
+      - db
+    # Dev-only convenience loop. Production uses a cron/systemd timer invoking
+    # `python run.py` directly — see docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 4.4.
+    entrypoint: ["sh", "-c", "while true; do python run.py; sleep 300; done"]
+
+volumes:
+  db_data:
