@@ -147,6 +147,14 @@ class Matchday(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     season_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("seasons.id"), nullable=False)
+    # The site's own round label (e.g. "Round 7", but also non-numeric playoff
+    # rounds like "Semifinal" / "Bronze medal" / "Final" -- confirmed on a real
+    # season). This, not `number`, is the actual identity of a matchday within
+    # a season -- `number` alone can't distinguish two differently-named
+    # rounds that both lack digits.
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    # Best-effort sort key derived from `label` (see scraper/db_writer.py);
+    # not guaranteed unique for non-numeric labels.
     number: Mapped[int] = mapped_column(Integer, nullable=False)
     # Nullable: lineup-deadline policy isn't implemented yet (see docs Section
     # 7, Next Steps) — the scraper creates a Matchday as soon as it discovers a

@@ -75,12 +75,19 @@ def get_or_create_active_season(session: Session, competition: Competition) -> S
 
 
 def get_or_create_matchday(session: Session, season: Season, round_label: str) -> Matchday:
+    """
+    Keyed by (season, label) — the round's text label is its real identity.
+    `number` is a best-effort sort key only; two different non-numeric labels
+    (e.g. "Semifinal" and "Final") must never collide, which a number-only key
+    would do (both would fall back to the same placeholder).
+    """
     matchday = session.scalar(
-        select(Matchday).where(Matchday.season_id == season.id, Matchday.number == _round_number(round_label))
+        select(Matchday).where(Matchday.season_id == season.id, Matchday.label == round_label)
     )
     if matchday is None:
         matchday = Matchday(
             season_id=season.id,
+            label=round_label,
             number=_round_number(round_label),
             status=MatchdayStatus.UPCOMING,
         )
@@ -89,12 +96,30 @@ def get_or_create_matchday(session: Session, season: Season, round_label: str) -
     return matchday
 
 
+# Known non-numeric playoff round labels, ordered after the regular season
+# (offsets chosen with gaps in case a quarterfinal round is seen later).
+_SPECIAL_ROUND_ORDER = {
+    "quarterfinal": 9000,
+    "semifinal": 9100,
+    "bronze medal": 9200,
+    "final": 9300,
+}
+
+
 def _round_number(round_label: str) -> int:
-    """"Termin 16" -> 16. Falls back to 0 if the label has no trailing number
-    (the site's round-label format for our 3 target competitions hasn't been
-    confirmed yet — see docs, Section 7)."""
+    """"Round 7" -> 7. Known playoff round names (Semifinal, Bronze medal,
+    Final, ...) map to fixed offsets past the regular season so they still
+    sort in a sensible order. Anything else unrecognized and non-numeric maps
+    to a stable hash-derived number -- not meaningfully ordered, but at least
+    distinct, so it can never silently collide with another round the way a
+    flat fallback to 0 would."""
     digits = "".join(ch for ch in round_label.split()[-1] if ch.isdigit())
-    return int(digits) if digits else 0
+    if digits:
+        return int(digits)
+    known = _SPECIAL_ROUND_ORDER.get(round_label.strip().lower())
+    if known is not None:
+        return known
+    return 900_000 + (hash(round_label) % 100_000)
 
 
 def upsert_fixture(session: Session, matchday: Matchday, fixture: ScrapedFixture) -> Match:
