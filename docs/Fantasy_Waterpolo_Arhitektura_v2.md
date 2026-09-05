@@ -61,6 +61,29 @@ Definitions below carry over unchanged from v1 unless noted.
 
 The v1 architecture document's `ingest` Go module (polling a paid Sports Data API) is removed entirely. It is replaced by a standalone Python component with no dependency on the web backend's language or runtime.
 
+### 4.1a Data Source — Verified Against a Real Match Page
+
+**A match page is not static HTML.** `totalwaterpolo.com` runs a WordPress plugin (`totalwaterpolo-prod`) that renders the match widget client-side: the page ships a placeholder tag (`<tw_match_expanded matchid="12681">`) and JavaScript (`twa-match.js`, `twa-api.js`) fills it in by calling the site's own backend, `https://arena.total-waterpolo.com/api/` (`Matches/`, `Events/`, `Players/stats`, `Teams/`, `Competitions/`, `Clubs/`, plus a SignalR hub for live matches — all documented in that plugin's own code comments).
+
+That API requires a Bearer token, confirmed by direct test (`401` without one). The token is meant to be injected server-side into the page for any visitor's browser, so this is not a paid or access-controlled partner API — but a plain `requests.get()` on the match URL only returns the page shell; the token/data never appear in that response.
+
+**Resolution: render the page in a headless browser (Playwright) instead of calling the API directly.** This reproduces exactly what a normal visitor's browser does — the site's own JS acquires the token and populates the DOM — with no token extraction or API reverse engineering involved. `scraper/fetch_boxscore.py` implements this: `playwright.sync_api` loads `https://total-waterpolo.com/tw_match/{id}`, waits for `.tw_full_match[tw-match-id]` to appear, then hands `page.content()` to the parser.
+
+This was verified end-to-end against a real saved match (id `12681`, competition `2358`, Valis Vega 21–14 Stari Grad): `scraper/parsers/match_page.py` correctly parsed all 26 rostered players (11 field players + 2 goalkeepers per side), and summed per-player goals to *exactly* the final score on both sides (21 and 14) — a strong end-to-end correctness check, not just "the code runs."
+
+**DOM contract** (see the module docstring in `scraper/parsers/match_page.py` for the full reference):
+
+- Team/score: `.tw_full_match[tw-match-id][tw-competition-id]`, `[tw-data="hometeamgoals"/"awayteamgoals"/"status"]`, team logo `onclick="OpenTeamPage(<id>, '<name>')"`.
+- Field players: `#homePlayers` / `#awayPlayers`, each `.tw_match_player[tw-player-id]` block. The name label's `onclick="OpenPlayerPage(<id>, '<name>')"` gives a **stable, cross-match player id directly in the box score** — this eliminates the fuzzy name-matching originally planned in Section 4.1 v1 (superseded); resolving a field player is a plain upsert-by-external-id.
+- Per-player aggregate stats (plain text, not canvas) via `[tw-chart-id="<key>_<player-id>"] [tw-data="homeResult"]` (the attribute name is a generic chart-component label meaning "this player's count" in this nested context, not home-team): `assists`, `pfdrawn` (→ `fouls_drawn`), `steals`, `blocks`, `swimoffs`, `ballslost` (→ `turnovers`), `offensivef` (→ `offensive_fouls`), `pf` (→ `personal_fouls`).
+- Goals, misses, and saves are **not** available as plain-text aggregates — the equivalent shots-made/attempted summary renders as a canvas doughnut chart with no scrapeable value. These are instead derived by counting `.tw_play_by_play[tw-event-id]` rows by their `.description` text (`goal scored` variants → goals; `shot missed` variants → misses; `Shot saved` → miss for the shooter + save for whoever the event's "saved by" detail field names).
+- **Goalkeepers are a separate section** (`#homeGoalkeepers` / `#awayGoalkeepers`) and, unlike field players, their name label has **no** `OpenPlayerPage` onclick — no stable id is exposed on the match page for them. `scraper/player_resolver.py` is scoped to this one gap: resolving goalkeepers by name, pending a team-squad page sample that might expose a proper id the same way the match page does for field players.
+
+**Known v1 simplifications** (documented in `match_page.py`, flagged here for visibility):
+- `goals_conceded` is assigned to whichever goalkeeper on a team recorded the most saves in the match (proxy for "the starting keeper") and set to the opponent's full final score. A mid-match keeper substitution (backup keeper who also recorded a save or two) is not split out — the backup's saves are still counted correctly, but all `goals_conceded` for that team goes to the presumed starter.
+- **Scoring model default:** "Miss" (−0.5) is counted only for `shot missed` / `Power play shot missed` events. A shot that was saved or blocked by the opponent still fails to score but is **not** counted as a miss for the shooter in v1 — treated as a contested attempt rather than a shooter error. Flag if you want saved/blocked attempts to also count as a miss for the shooter.
+- The fixture-list/schedule page has not been sampled yet — it almost certainly needs the same Playwright approach (same plugin architecture), but `scraper/parsers/schedule_page.py` remains a stub until a sample page is available (see Section 7, Next Steps).
+
 ### 4.1 Component Structure
 
 ```
@@ -70,9 +93,8 @@ scraper/
 ├── parsers/              # ALL CSS/XPath selectors live here, isolated by page type
 │   ├── schedule_page.py  # so a site redesign means editing one file, not the pipeline
 │   └── match_page.py
-├── player_resolver.py   # scraped name -> internal player_id (fuzzy match on
-│                          # name + club + position; totalwaterpolo has no stable
-│                          # cross-season player ID)
+├── player_resolver.py   # goalkeepers only, by name -- field players carry a
+│                          # stable external id directly in the box score (4.1a)
 └── run.py                # orchestrator entrypoint, invoked by cron/systemd timer
 ```
 
@@ -87,7 +109,7 @@ scraper/
 
 ### 4.3 Operational Notes
 
-- **Rate limiting & etiquette** — respect robots.txt, fixed delay between requests, identifiable User-Agent. This is a public site, not an API partner — getting rate-limited mid-match would be a self-inflicted outage.
+- **Rate limiting & etiquette** — respect robots.txt, fixed delay between page loads, identifiable User-Agent on the headless browser context. This is a public site being rendered like any visitor's browser, not an API partner — getting rate-limited or IP-blocked mid-match would be a self-inflicted outage. A headless browser is also heavier per request than a plain HTTP call (Section 4.1a) — the polling interval in Section 4.4 should account for that cost, not just politeness.
 - **Raw HTML snapshots** *(recommended, low cost)* — store the fetched page alongside the parsed result so a broken parser can be diagnosed without waiting for a re-scrape.
 - **Optional future addition — Claude-assisted self-healing**: a scheduled Claude Code cloud routine (e.g. weekly, or triggered by a run of consecutive `scrape_runs` errors) that reviews failures against current site HTML and proposes a fix to `parsers/`. This is explicitly **not** part of the production runtime — the pipeline itself is fully deterministic cron + Python, per the decision below.
 
@@ -187,7 +209,11 @@ Moot for v1 — Redis is not part of the v1 stack (Section 5.3). Applies only on
 
 ## 7. Next Steps
 
-1. Confirm OQ-5 default (captain lock/cancellation behavior) or provide the desired rule.
-2. Obtain a sample match page URL from totalwaterpolo.com per competition to lock down `parsers/` selectors.
-3. Scaffold repository structure: FastAPI backend, `scraper/` package, Postgres migrations (competitions → seasons → matchdays/matches → players/coaches → leagues/fantasy_teams → rosters/lineups → stats/scores/price_history).
-4. Stand up the three auto-created global leagues (one per competition) as part of season-creation logic.
+1. ~~Confirm OQ-5 default~~ — done: captain multiplier does not apply (reverts to ×1) if the real-world match is cancelled/postponed.
+2. ~~Obtain a sample match page and lock down `parsers/match_page.py` selectors~~ — done and verified end-to-end against a real match (Section 4.1a): field players resolve via a stable id in the box score, goalkeepers need name resolution, goals/misses/saves derive from play-by-play, everything else from per-player aggregate charts.
+3. ~~Scaffold repository structure~~ — done: FastAPI backend, SQLAlchemy models, Alembic migration setup, Docker Compose, all pushed to `Vuksa11/Waterpolo-Fantasy`.
+4. **Obtain a sample fixture-list page** (one competition's schedule/results listing) to write `scraper/parsers/schedule_page.py` the same way — this is the one remaining scraper gap before the pipeline can run end-to-end.
+5. Generate and run the first Alembic migration against a live Postgres (`docker compose up -d db && alembic revision --autogenerate -m "initial schema"`) — the models haven't been validated against a real database yet.
+6. Wire up the DB upsert layer in `fetch_boxscore.py`/`run.py` (currently returns a parsed dataclass only) and the goalkeeper name-resolution in `player_resolver.py` (pending a team-squad page sample for a proper stable id).
+7. Stand up the three auto-created global leagues (one per competition) as part of season-creation logic.
+8. Implement the scoring module (raw_points → final_points with bench/captain multipliers) and the price-change formula (Section OQ-2) — pure logic, doesn't depend on the scraper.
