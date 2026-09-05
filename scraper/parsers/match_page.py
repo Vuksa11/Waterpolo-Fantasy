@@ -65,13 +65,12 @@ Known v1 simplifications (see docs, Section 4.1a "Known limitations"):
     doesn't match expectations once real data is scored.
 """
 
-import re
 from dataclasses import dataclass, field
 
 from bs4 import BeautifulSoup
 from bs4.element import Tag
 
-_ONCLICK_ID_NAME_RE = re.compile(r"Open(?:Player|Team)Page\((\d+),\s*'([^']*)'\)")
+from scraper.parsers.common import extract_id_name, optional_int, text
 
 _GOAL_DESCRIPTIONS = {"goal scored", "fastbreak goal scored", "penalty goal scored", "power play goal scored"}
 _MISS_DESCRIPTIONS = {"shot missed", "power play shot missed"}
@@ -129,28 +128,12 @@ class ScrapedMatchBoxScore:
     players: list[ScrapedPlayerBoxScore] = field(default_factory=list)
 
 
-def _extract_id_name(onclick: str | None) -> tuple[int, str] | None:
-    if not onclick:
-        return None
-    m = _ONCLICK_ID_NAME_RE.search(onclick)
-    return (int(m.group(1)), m.group(2)) if m else None
-
-
-def _text(tag: Tag | None) -> str:
-    return tag.get_text(strip=True) if tag else ""
-
-
-def _int_text(tag: Tag | None) -> int:
-    t = _text(tag)
-    return int(t) if t.lstrip("-").isdigit() else 0
-
-
 def _chart_value(player_block: Tag, chart_key: str, player_id: str) -> int:
     chart = player_block.find(attrs={"tw-chart-id": f"{chart_key}_{player_id}"})
     if chart is None:
         return 0
     value_span = chart.find(attrs={"tw-data": "homeResult"})
-    return _int_text(value_span)
+    return optional_int(value_span) or 0
 
 
 def _parse_roster_section(section: Tag, side: str) -> dict[str, ScrapedPlayerBoxScore]:
@@ -158,16 +141,16 @@ def _parse_roster_section(section: Tag, side: str) -> dict[str, ScrapedPlayerBox
     players: dict[str, ScrapedPlayerBoxScore] = {}
     for block in section.select(".tw_match_player[tw-player-id]"):
         player_id = block["tw-player-id"]
-        jersey = _text(block.find(attrs={"tw-data": "playerNum"}))
+        jersey = text(block.find(attrs={"tw-data": "playerNum"}))
         name_el = block.find(attrs={"tw-data": "playerName"})
         if name_el is None:
             continue
-        id_name = _extract_id_name(name_el.get("onclick"))
+        id_name = extract_id_name(name_el.get("onclick"))
         # Field players expose a stable external id via the OpenPlayerPage onclick.
         # Goalkeepers (in #home/#awayGoalkeepers) do not — their name-label has no
         # onclick at all. external_player_id is None for these; player_resolver.py
         # must resolve them by name against a team squad lookup instead.
-        external_id, name = id_name if id_name else (None, _text(name_el))
+        external_id, name = id_name if id_name else (None, text(name_el))
 
         stat = ScrapedPlayerBoxScore(
             match_local_id=player_id,
@@ -175,7 +158,7 @@ def _parse_roster_section(section: Tag, side: str) -> dict[str, ScrapedPlayerBox
             name=name,
             jersey_number=int(jersey) if jersey.isdigit() else 0,
             team_side=side,
-            personal_fouls=_chart_value(block, "pf", player_id) or _int_text(block.find(attrs={"tw-data": "playerPF"})),
+            personal_fouls=_chart_value(block, "pf", player_id) or (optional_int(block.find(attrs={"tw-data": "playerPF"})) or 0),
         )
         for chart_key, field_name in _CHART_KEY_TO_FIELD.items():
             setattr(stat, field_name, _chart_value(block, chart_key, player_id))
@@ -188,8 +171,8 @@ def _event_detail_field(event: Tag, label: str) -> str | None:
     for row in event.select(".eventDetails .detailsMetaRow"):
         desc = row.select_one(".col-3.description")
         value = row.select_one(".col-9.label")
-        if desc and value and _text(desc).lower() == label.lower():
-            return _text(value)
+        if desc and value and text(desc).lower() == label.lower():
+            return text(value)
     return None
 
 
@@ -203,9 +186,9 @@ def _apply_play_by_play(
     name_to_player = {p.name.strip(): p for p in [*home_players.values(), *away_players.values()]}
 
     for event in soup.select(".tw_play_by_play[tw-event-id]"):
-        team_code = _text(event.find(attrs={"tw-data": "team"}))
-        jersey = _text(event.find(attrs={"tw-data": "playerNum"}))
-        description = _text(event.select_one(".event-label .description")).lower()
+        team_code = text(event.find(attrs={"tw-data": "team"}))
+        jersey = text(event.find(attrs={"tw-data": "playerNum"}))
+        description = text(event.select_one(".event-label .description")).lower()
 
         roster = home_players if team_code == home_short else away_players if team_code == away_short else None
         actor = roster.get(jersey) if roster else None
@@ -251,18 +234,18 @@ def parse_match_page(html: str) -> ScrapedMatchBoxScore:
 
     home_logo_img = soup.find(attrs={"tw-data": "hometeamlogo"}).find("img")
     away_logo_img = soup.find(attrs={"tw-data": "awayteamlogo"}).find("img")
-    home_id_name = _extract_id_name(home_logo_img.get("onclick"))
-    away_id_name = _extract_id_name(away_logo_img.get("onclick"))
+    home_id_name = extract_id_name(home_logo_img.get("onclick"))
+    away_id_name = extract_id_name(away_logo_img.get("onclick"))
 
-    home_short = _text(soup.find(attrs={"tw-data": "hometeamname_short"}))
-    away_short = _text(soup.find(attrs={"tw-data": "awayteamname_short"}))
+    home_short = text(soup.find(attrs={"tw-data": "hometeamname_short"}))
+    away_short = text(soup.find(attrs={"tw-data": "awayteamname_short"}))
 
     home_team = ScrapedTeam(home_id_name[0], home_id_name[1], home_short, "HOME")
     away_team = ScrapedTeam(away_id_name[0], away_id_name[1], away_short, "AWAY")
 
-    home_score = _int_text(soup.find(attrs={"tw-data": "hometeamgoals"}))
-    away_score = _int_text(soup.find(attrs={"tw-data": "awayteamgoals"}))
-    status = _text(soup.find(attrs={"tw-data": "status"}))
+    home_score = optional_int(soup.find(attrs={"tw-data": "hometeamgoals"})) or 0
+    away_score = optional_int(soup.find(attrs={"tw-data": "awayteamgoals"})) or 0
+    status = text(soup.find(attrs={"tw-data": "status"}))
 
     home_players: dict[str, ScrapedPlayerBoxScore] = {}
     away_players: dict[str, ScrapedPlayerBoxScore] = {}
