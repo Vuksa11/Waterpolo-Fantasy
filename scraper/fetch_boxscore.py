@@ -1,5 +1,6 @@
 """
-Fetches and renders a single match page via headless browser, then parses it.
+Fetches and renders a single match page via headless browser, then parses and
+upserts its box score.
 
 Pipeline steps 2-3 in docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 4.2.
 
@@ -13,8 +14,13 @@ real saved match page (12681) — see docs/Fantasy_Waterpolo_Arhitektura_v2.md,
 Section 4.1a.
 """
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from playwright.sync_api import sync_playwright
 
+from db.models import Match
+from scraper.db_writer import get_or_create_competition, upsert_box_score
 from scraper.parsers.match_page import ScrapedMatchBoxScore, parse_match_page
 
 _MATCH_URL_TEMPLATE = "https://total-waterpolo.com/tw_match/{external_match_id}"
@@ -34,14 +40,27 @@ def render_match_page(external_match_id: int) -> str:
     return html
 
 
-def fetch_boxscore(external_match_id: int) -> ScrapedMatchBoxScore:
+def fetch_boxscore(session: Session, external_match_id: int) -> ScrapedMatchBoxScore:
     """
-    Render a match page and parse its box score.
+    Render a match page, parse its box score, and upsert player_stats.
 
-    Upserting the result into player_stats/coach_stats (keyed by match_id +
-    player_id, resolved via player_resolver) is wired up once the DB session
-    layer exists — see docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 7
-    (Next Steps).
+    Requires the match to already exist (created by fetch_schedule for its
+    competition) — this only fills in stats for a match that's already known,
+    matching the real discovery order (schedule first, box score once played).
     """
     html = render_match_page(external_match_id)
-    return parse_match_page(html)
+    box = parse_match_page(html)
+
+    match = session.scalar(select(Match).where(Match.external_id == str(external_match_id)))
+    if match is None:
+        raise ValueError(
+            f"Match {external_match_id} not found in the database — "
+            "run fetch_schedule for its competition first."
+        )
+
+    competition = get_or_create_competition(
+        session, box.external_competition_id, schedule_url=box.competition_url
+    )
+    upsert_box_score(session, competition, match, box)
+    session.commit()
+    return box

@@ -123,6 +123,12 @@ class Competition(Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     source_slug: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    # The competition's schedule page on totalwaterpolo.com, discovered from
+    # any of its matches' `tw-competition-url` attribute (see
+    # scraper/parsers/match_page.py). Nullable because a competition can be
+    # created from a match box score before its schedule page has ever been
+    # visited.
+    schedule_url: Mapped[str | None] = mapped_column(String)
 
 
 class Season(Base):
@@ -142,7 +148,10 @@ class Matchday(Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     season_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("seasons.id"), nullable=False)
     number: Mapped[int] = mapped_column(Integer, nullable=False)
-    deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Nullable: lineup-deadline policy isn't implemented yet (see docs Section
+    # 7, Next Steps) — the scraper creates a Matchday as soon as it discovers a
+    # round, before any deadline has been computed.
+    deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[MatchdayStatus] = mapped_column(Enum(MatchdayStatus, name="matchday_status"), nullable=False)
 
 
@@ -157,7 +166,11 @@ class Match(Base):
     home_score: Mapped[int | None] = mapped_column(Integer)
     away_score: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[MatchStatus] = mapped_column(Enum(MatchStatus, name="match_status"), nullable=False)
-    kickoff_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Nullable: the scraper discovers a match from the fixture-list page (teams,
+    # score, no kickoff time) before it ever fetches that match's own page,
+    # which is the only place kickoff time is exposed. Backfilled once the box
+    # score is fetched. See docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 4.1a.
+    kickoff_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Player(Base):
@@ -165,9 +178,17 @@ class Player(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     competition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("competitions.id"), nullable=False)
-    external_id: Mapped[str] = mapped_column(String, nullable=False)
+    external_id: Mapped[str | None] = mapped_column(String)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    position: Mapped[Position] = mapped_column(Enum(Position, name="position"), nullable=False)
+    # Nullable: the match box score distinguishes goalkeepers from field
+    # players (separate DOM section) but does not expose OT/CF/CB for field
+    # players anywhere — confirmed absent from a real sampled match page. Left
+    # null until a team-squad page (also needed for goalkeeper id resolution,
+    # see scraper/player_resolver.py) is found to expose it.
+    # external_id is nullable for the same reason a goalkeeper has no id on
+    # the match page (see player_resolver.py) — a field player's is always
+    # populated at creation time; a goalkeeper's is filled in once resolved.
+    position: Mapped[Position | None] = mapped_column(Enum(Position, name="player_position"))
     real_club: Mapped[str] = mapped_column(String, nullable=False)
     current_cost: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=7)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)

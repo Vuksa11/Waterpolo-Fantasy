@@ -120,6 +120,7 @@ class ScrapedPlayerBoxScore:
 class ScrapedMatchBoxScore:
     external_match_id: int
     external_competition_id: int
+    competition_url: str | None
     home_team: ScrapedTeam
     away_team: ScrapedTeam
     home_score: int
@@ -231,6 +232,7 @@ def parse_match_page(html: str) -> ScrapedMatchBoxScore:
     competition_root = soup.select_one(".tw_full_match[tw-competition-id]")
     external_competition_id = int(competition_root["tw-competition-id"])
     external_match_id = int(competition_root["tw-match-id"])
+    competition_url = competition_root.get("tw-competition-url")
 
     home_logo_img = soup.find(attrs={"tw-data": "hometeamlogo"}).find("img")
     away_logo_img = soup.find(attrs={"tw-data": "awayteamlogo"}).find("img")
@@ -266,6 +268,7 @@ def parse_match_page(html: str) -> ScrapedMatchBoxScore:
     return ScrapedMatchBoxScore(
         external_match_id=external_match_id,
         external_competition_id=external_competition_id,
+        competition_url=competition_url,
         home_team=home_team,
         away_team=away_team,
         home_score=home_score,

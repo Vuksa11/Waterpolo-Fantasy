@@ -3,22 +3,61 @@ Fetches and upserts the fixture list for one competition.
 
 Pipeline step 1 in docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 4.2.
 
-The match page (see fetch_boxscore.py) confirmed that this plugin renders data
-client-side against a token-gated API, so the fixture-list page almost
-certainly needs the same headless-browser approach — but this hasn't been
-verified against a real saved fixture-list page yet. Once a sample is
-available (Section 7, Next Steps), a schedule_page.py parser can be written
-the same way match_page.py was: inspect the real rendered DOM, map its
-tw-data attributes, and verify against known results before trusting it.
+Like the match page, this needs a headless browser — confirmed by sampling a
+real competition page ("VRL Prva Liga 2025/26"); see
+scraper/parsers/schedule_page.py for the DOM contract and
+docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 4.1a for why a plain HTTP GET
+doesn't work here.
 """
 
-import uuid
+from playwright.sync_api import sync_playwright
+from sqlalchemy.orm import Session
+
+from scraper.db_writer import (
+    get_or_create_active_season,
+    get_or_create_competition,
+    get_or_create_matchday,
+    upsert_fixture,
+)
+from scraper.parsers.schedule_page import parse_schedule_page
+
+_RENDER_TIMEOUT_MS = 15_000
 
 
-def fetch_schedule(competition_id: uuid.UUID, source_slug: str) -> None:
+def render_schedule_page(url: str) -> str:
+    """Load a competition's schedule page in a headless browser and return the
+    fully-rendered HTML."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(url, wait_until="networkidle")
+        page.wait_for_selector(".tw_competition_round[tw_round_id]", timeout=_RENDER_TIMEOUT_MS)
+        html = page.content()
+        browser.close()
+    return html
+
+
+def fetch_schedule(session: Session, schedule_url: str, competition_name: str | None = None) -> int:
     """
-    Fetch the fixture-list page for a competition and upsert into matches/matchdays.
+    Render a competition's schedule page and upsert every fixture found on it.
 
-    TODO: pending a sample fixture-list page (see module docstring).
+    Returns the number of fixtures written. Each fixture becomes a `matches`
+    row (score/status only — no kickoff time; see db/models.py Match.kickoff_at)
+    grouped into a `matchdays` row by the site's own round label. Player-level
+    stats are NOT touched here — that's fetch_boxscore.py's job, run per-match
+    once a fixture is FINISHED.
     """
-    raise NotImplementedError("Pending a sample fixture-list page — see module docstring.")
+    html = render_schedule_page(schedule_url)
+    external_competition_id, fixtures = parse_schedule_page(html)
+
+    competition = get_or_create_competition(
+        session, external_competition_id, name=competition_name, schedule_url=schedule_url
+    )
+    season = get_or_create_active_season(session, competition)
+
+    for fixture in fixtures:
+        matchday = get_or_create_matchday(session, season, fixture.round_label)
+        upsert_fixture(session, matchday, fixture)
+
+    session.commit()
+    return len(fixtures)
