@@ -9,6 +9,7 @@ locally. A single longer-lived access token (7 days, see config.py) stands in
 for the access+refresh pair for now.
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -24,6 +25,26 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, password_hash: str) -> bool:
     return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+
+
+async def hash_password_async(password: str) -> str:
+    """
+    bcrypt is deliberately slow and, unlike the rest of this async codebase,
+    synchronous/CPU-bound -- calling it directly from an async route blocks
+    the *entire* single-threaded event loop for its full duration, stalling
+    every other concurrent request being served by this process. Confirmed
+    by the Phase-1 baseline load test (backend/loadtest/): POST
+    /api/auth/register had a ~1.1s median under 100 concurrent simulated
+    users, and *other* endpoints' p98/p99 spiked into the 1-3s range at the
+    same time -- consistent with bcrypt work blocking everyone else, not
+    those endpoints being slow themselves. Routes should call this (or
+    verify_password_async), not the sync functions above directly.
+    """
+    return await asyncio.to_thread(hash_password, password)
+
+
+async def verify_password_async(password: str, password_hash: str) -> bool:
+    return await asyncio.to_thread(verify_password, password, password_hash)
 
 
 def create_access_token(user_id: uuid.UUID) -> str:

@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import create_access_token, hash_password_async, verify_password_async
 from app.deps import get_current_user
 from app.schemas import TokenOut, UserLoginIn, UserOut, UserRegisterIn
 from db.models import User
@@ -19,7 +19,7 @@ async def register(body: UserRegisterIn, db: AsyncSession = Depends(get_db)) -> 
 
     user = User(
         email=body.email,
-        password_hash=hash_password(body.password),
+        password_hash=await hash_password_async(body.password),
         display_name=body.display_name,
     )
     db.add(user)
@@ -32,7 +32,11 @@ async def register(body: UserRegisterIn, db: AsyncSession = Depends(get_db)) -> 
 @router.post("/login", response_model=TokenOut)
 async def login(body: UserLoginIn, db: AsyncSession = Depends(get_db)) -> TokenOut:
     user = await db.scalar(select(User).where(User.email == body.email))
-    if user is None or user.password_hash is None or not verify_password(body.password, user.password_hash):
+    if (
+        user is None
+        or user.password_hash is None
+        or not await verify_password_async(body.password, user.password_hash)
+    ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     return TokenOut(access_token=create_access_token(user.id))
