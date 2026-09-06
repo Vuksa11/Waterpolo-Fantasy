@@ -15,6 +15,7 @@ from), but the CancelledError unit test always runs since it needs no DB.
 
 import asyncio
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -149,6 +150,29 @@ async def roster_fixture(db_session):
     await db_session.commit()
     await db_session.refresh(user)
 
+    # transfer() gates on current_window() -- merged in from the frontend
+    # branch's tested contract, which correctly treats "no verified upcoming
+    # deadline" as a closed transfer window. Every real matchday in the dev
+    # DB is FINISHED with no deadline (a fully historical scraped season),
+    # so without a test-only UPCOMING+future-deadline matchday for the exact
+    # season create_team will pick (competition's latest by start_date),
+    # every transfer here would 409 regardless of the idempotency behavior
+    # actually under test.
+    from db.models import Matchday, MatchdayStatus, Season
+
+    season = await db_session.scalar(
+        select(Season).where(Season.competition_id == competition.id).order_by(Season.start_date.desc(), Season.id).limit(1)
+    )
+    test_matchday = Matchday(
+        season_id=season.id,
+        label="Idempotency Test Round",
+        number=999999,
+        status=MatchdayStatus.UPCOMING,
+        deadline=datetime.now(timezone.utc) + timedelta(days=1),
+    )
+    db_session.add(test_matchday)
+    await db_session.commit()
+
     yield {
         "competition_id": competition.id,
         "players": players,
@@ -171,6 +195,7 @@ async def roster_fixture(db_session):
     await db_session.execute(FantasyTeam.__table__.delete().where(FantasyTeam.user_id == user.id))
     await db_session.execute(IdempotencyKey.__table__.delete().where(IdempotencyKey.user_id == user.id))
     await db_session.execute(User.__table__.delete().where(User.id == user.id))
+    await db_session.execute(Matchday.__table__.delete().where(Matchday.id == test_matchday.id))
     await db_session.commit()
 
 
@@ -229,7 +254,7 @@ async def test_invalid_transfer_releases_idempotency_claim(client, roster_fixtur
         },
         headers={"Authorization": f"Bearer {token}", "Idempotency-Key": key},
     )
-    assert resp.status_code == 404, resp.text
+    assert resp.status_code == 422, resp.text
 
     from db.models import IdempotencyKey
 
@@ -247,7 +272,7 @@ async def test_invalid_transfer_releases_idempotency_claim(client, roster_fixtur
         },
         headers={"Authorization": f"Bearer {token}", "Idempotency-Key": key},
     )
-    assert resp.status_code == 404, resp.text
+    assert resp.status_code == 422, resp.text
 
 
 async def test_concurrent_same_key_transfer_serializes(client, roster_fixture, db_session):
@@ -349,12 +374,15 @@ async def test_cancelled_task_still_releases_claim():
 
     db = MagicMock()
     db.rollback = AsyncMock()
+    # create_team's first real DB read after the idempotency claim is a
+    # plain `db.scalar(select(Season)...)` (no separate helper function to
+    # patch since the frontend-branch merge inlined it) -- simulate the
+    # request task being cancelled right there.
+    db.scalar = AsyncMock(side_effect=asyncio.CancelledError())
 
     with patch.object(teams_mod, "_claim_idempotency_key", AsyncMock(return_value=None)), patch.object(
         teams_mod, "_release_idempotency_key", AsyncMock()
-    ) as release, patch.object(teams_mod, "_fulfill_idempotency_key", AsyncMock()), patch.object(
-        teams_mod, "_get_active_season", AsyncMock(side_effect=asyncio.CancelledError())
-    ):
+    ) as release, patch.object(teams_mod, "_fulfill_idempotency_key", AsyncMock()):
         current_user = MagicMock()
         current_user.id = uuid.uuid4()
         body = MagicMock()

@@ -1,0 +1,14 @@
+{
+  "name": "vrl-fantasy-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "start": "node server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check src/app.js && node --check src/api.js && node --check src/lineup.js && node --check src/round.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

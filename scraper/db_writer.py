@@ -129,6 +129,7 @@ def upsert_fixture(session: Session, matchday: Matchday, fixture: ScrapedFixture
         match = Match(matchday_id=matchday.id, external_id=str(fixture.external_match_id))
         session.add(match)
 
+    match.matchday_id = matchday.id
     match.home_club = fixture.home_team.name
     match.away_club = fixture.away_team.name
     match.home_score = fixture.home_score

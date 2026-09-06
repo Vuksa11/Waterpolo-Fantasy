@@ -19,7 +19,7 @@ async def list_matches(matchday_id: uuid.UUID, db: AsyncSession = Depends(get_db
 
 @router.get("/{matchday_id}/top-performers", response_model=list[TopPerformerOut])
 async def top_performers(
-    matchday_id: uuid.UUID, limit: int = Query(10, ge=1, le=100), db: AsyncSession = Depends(get_db)
+    matchday_id: uuid.UUID, limit: int = Query(default=10, ge=1, le=100), db: AsyncSession = Depends(get_db)
 ) -> list[TopPerformerOut]:
     matchday = await db.get(Matchday, matchday_id)
     if matchday is None:
@@ -29,7 +29,7 @@ async def top_performers(
         select(FantasyScore, Player)
         .join(Player, Player.id == FantasyScore.entity_id)
         .where(FantasyScore.matchday_id == matchday_id, FantasyScore.entity_type == EntityType.PLAYER)
-        .order_by(FantasyScore.raw_points.desc())
+        .order_by(FantasyScore.raw_points.desc(), Player.id)
         .limit(limit)
     )
     return [

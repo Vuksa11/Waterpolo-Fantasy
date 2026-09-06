@@ -56,3 +56,9 @@ API docs (Swagger UI) once running: `http://localhost:8000/docs`.
   matches, matchdays, top performers). No auth or fantasy-team layer yet.
 
 See docs, Section 7 (Next Steps) for the full remaining list.
+
+## Frontend branch
+
+The integrated responsive client lives in [frontend/](frontend/README.md). Start FastAPI on8001 and run `API_TARGET=http://127.0.0.1:8001 npm run dev` from frontend to preview on http://localhost:3000.
+
+See [API coordination](docs/FRONTEND_BACKEND_HANDOFF.md) and [design decisions](docs/DESIGN_DECISIONS.md). Apply Alembic migrations before using team writes; never treat unverified positions or missing deadlines as playable data.

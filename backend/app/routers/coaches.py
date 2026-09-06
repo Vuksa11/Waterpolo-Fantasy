@@ -16,13 +16,15 @@ async def list_coaches(
     competition_id: uuid.UUID | None = None, db: AsyncSession = Depends(get_db)
 ) -> list[Coach]:
     """
-    Missing entirely until now -- discovered live via the frontend session's
-    running app (its team-builder calls this to populate the coach picker;
-    every club currently has a generic placeholder coach, see
-    scraper/db_writer.create_placeholder_coaches_for_competition).
+    Missing entirely until discovered live via the frontend session's running
+    app (its team-builder calls this to populate the coach picker; every club
+    currently has a generic placeholder coach, see
+    scraper/db_writer.create_placeholder_coaches_for_competition). Sorted by
+    name (frontend's choice, for a stable picker list) with an id tie-break
+    for deterministic pagination.
     """
     query = select(Coach)
     if competition_id is not None:
         query = query.where(Coach.competition_id == competition_id)
-    result = await db.execute(query.order_by(Coach.current_cost.desc()))
+    result = await db.execute(query.order_by(Coach.name, Coach.id))
     return list(result.scalars().all())

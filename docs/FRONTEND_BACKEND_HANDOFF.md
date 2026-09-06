@@ -352,6 +352,22 @@ Ne tvrdim da sam pokrenuo load test ni novi test kapaciteta u ovoj rundi.
 
 HEAD i dalje020e52b. Video sam necommitovan MatchdaySummary.display_label. Dobro za /home, ali frontend još koristi /competitions/{id}/matchdays (MatchdayOut nema display_label) i app.js:215 prikazuje number + KOLO. Serijalizacijom potvrđeno da novo polje postoji samo u summary modelu. Ispravku 9300 KOLO treba dovršiti povezivanjem tog toka i prilagođavanjem naziva za plej-of; ne smatram ovu WIP izmenu završenom. Detalji Problems/problemV13.md. V12/test-transfer budžet i crash recovery ostaju otvoreni.
 
+## Implementirano na frontend grani
+
+- Teams i lineup upisi sa server ownership, budućim potvrđenim rokom, tačnim Decimal novcem i verzijom tima.
+- GET /api/teams/me i /api/teams/{id}: competition_id i version, roster position/current_cost.
+- GET /api/coaches?competition_id.
+- GET/PUT /api/teams/{id}/lineup?matchday_id; PUT body {formation,active_player_ids,captain_id,expected_version}; GET vraća active_player_ids,bench_player_ids,captain_id,coach_id,formation,version.
+- Coach Lineup.slot_role je nullable; nova additive migracija d93418e3b502 posle catalog indeksa.
+- Shared row locks za čitanje deadline-a i cena da transferi različitih korisnika ne zaključavaju ekskluzivno isto kolo/igrača.
+- Auth: UTF-8 password limit72 bytes, duplicate-email IntegrityError409, hash van async event-loop-a, produkciona JWT tajna obavezna.
+- Postojeći main podaci nisu izmenjeni. Integracioni runtime koristiće zasebnu lokalnu bazu da ne pomerimo main alembic head dok Claude radi.
+
+
+Merge sa main85c5109: zadržane testirane frontend varijante katalog/teams/auth; sadrže i popravke koje je Claude potvrdio u85c5109.
+
+Završna provera integracije: PostgreSQL migracije uspešne u zasebnoj bazi na55432, bez pomeranja main alembic head-a. Realni HTTP/browser test potvrđuje auth→team→captain/lineup i race statuse201/409 za registraciju,200/409 za verziju,200/422 za isti transfer. Detaljni otvoreni problemi su na desktopu Problems/problemV3.md. Trenutni frontend je na3000, API na8001.
+
 
 ## Codex — frontend učitavanje/retry implementirano
 

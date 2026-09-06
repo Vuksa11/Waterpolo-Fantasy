@@ -1,0 +1,105 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  FORMATIONS,
+  autoLineup,
+  lineupErrors,
+  rosterErrors,
+  changeFormation,
+  buyPlayer,
+  safeDraft,
+} from "../src/lineup.js";
+import { demoDraft, demoPlayers } from "../src/demo.js";
+const pool = ["GK", "OT", "OT", "OT", "OT", "CF", "CF", "CB", "CB"].map(
+  (position, i) => ({
+    id: String(i),
+    name: "P" + i,
+    position,
+    current_cost: 7,
+  }),
+);
+test("formations enforce GK1 OT4 and correct specialists", () => {
+  for (const [name, f] of Object.entries(FORMATIONS)) {
+    const active = autoLineup(name, pool);
+    assert.equal(active.length, 7);
+    assert.equal(new Set(active).size, 7);
+    assert.deepEqual(lineupErrors(name, active, pool, active[0]), []);
+    assert.equal(f.roles.filter((x) => x === "GK").length, 1);
+    assert.equal(f.roles.filter((x) => x === "OT").length, 4);
+  }
+});
+test("wrong role, duplicate, bench captain and unknown position rejected", () => {
+  const a = autoLineup("THREE_THREE", pool);
+  assert.ok(
+    lineupErrors("THREE_THREE", [a[1], ...a.slice(1)], pool, a[0]).length,
+  );
+  assert.ok(lineupErrors("THREE_THREE", a, pool, "unused").length);
+  assert.ok(
+    lineupErrors(
+      "THREE_THREE",
+      a,
+      pool.map((p) => ({ ...p, position: null })),
+      a[0],
+    ).length,
+  );
+});
+test("formation switch preserves roster and leaves absent specialist empty", () => {
+  const d = changeFormation(structuredClone(demoDraft), "TWO_FOUR");
+  assert.equal(d.roster.length, 11);
+  assert.equal(d.active.filter(Boolean).length, 6);
+  assert.ok(d.active.includes(null));
+  assert.deepEqual(d.roster, demoDraft.roster);
+});
+test("demo roster meets 11-player and bench roles", () => {
+  assert.deepEqual(rosterErrors(demoDraft.roster, demoDraft.active), []);
+  assert.deepEqual(
+    lineupErrors(
+      demoDraft.formation,
+      demoDraft.active,
+      demoDraft.roster,
+      demoDraft.captain,
+    ),
+    [],
+  );
+});
+test("replacement unlocks defensive formation without duplicates", () => {
+  let d = changeFormation(structuredClone(demoDraft), "TWO_FOUR");
+  const p = demoPlayers.find(
+    (p) => p.position === "CB" && !d.roster.some((r) => r.id === p.id),
+  );
+  d = buyPlayer(d, p, "12");
+  assert.deepEqual(
+    lineupErrors(d.formation, d.active, d.roster, d.captain),
+    [],
+  );
+  assert.deepEqual(rosterErrors(d.roster, d.active), []);
+  assert.equal(d.roster.length, 11);
+});
+test("transfers enforce budget capacity and unknown position", () => {
+  assert.throws(
+    () =>
+      buyPlayer(
+        demoDraft,
+        { id: "xx", name: "x", position: "OT", current_cost: 99 },
+        "2",
+      ),
+    /kredita/,
+  );
+  assert.throws(
+    () =>
+      buyPlayer(
+        demoDraft,
+        { id: "xx", name: "x", position: null, current_cost: 1 },
+        "2",
+      ),
+    /poziciju/,
+  );
+  assert.throws(() => buyPlayer(demoDraft, demoPlayers[12]), /pun/);
+});
+test("corrupt persisted draft falls back and state roundtrips", () => {
+  assert.deepEqual(safeDraft({ formation: "BAD" }, demoDraft), demoDraft);
+  assert.deepEqual(
+    safeDraft(JSON.parse(JSON.stringify(demoDraft)), demoDraft),
+    demoDraft,
+  );
+});

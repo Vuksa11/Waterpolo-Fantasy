@@ -7,39 +7,42 @@ matches, matchdays. See docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 7.
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, computed_field, field_validator
-
-# bcrypt hashes only the first 72 bytes of its input and raises ValueError on
-# anything longer (confirmed: this is a hard C-library limit, not something
-# truncating silently) -- both bcrypt.hashpw (register) and bcrypt.checkpw
-# (login) throw, which without this check surfaces as an unhandled 500 for a
-# password a user could reasonably type. Validating here turns it into a
-# clean 422 instead. Bug found by the frontend session's test suite
-# (test_auth_rejects_password_over_bcrypt_byte_limit) against the auth
-# endpoints added in commit 4044304.
-_MAX_PASSWORD_BYTES = 72
-
-
-def _validate_password_length(password: str) -> str:
-    if len(password.encode("utf-8")) > _MAX_PASSWORD_BYTES:
-        raise ValueError(f"Password must be at most {_MAX_PASSWORD_BYTES} bytes (UTF-8 encoded)")
-    return password
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator
 
 
 class UserRegisterIn(BaseModel):
     email: EmailStr
-    password: str
-    display_name: str
+    password: str = Field(min_length=8, max_length=72)
+    display_name: str = Field(min_length=1, max_length=60)
 
-    _validate_password = field_validator("password")(_validate_password_length)
+    @field_validator("password")
+    @classmethod
+    def password_bytes(cls, value):
+        # bcrypt hashes only the first 72 bytes of its input and raises
+        # ValueError on anything longer (confirmed: a hard C-library limit,
+        # not something truncating silently) -- both bcrypt.hashpw (register)
+        # and bcrypt.checkpw (login) throw, which without this check surfaces
+        # as an unhandled 500 for a password a user could reasonably type.
+        # `max_length=72` above already rejects most cases, but that counts
+        # Python characters, not UTF-8 bytes, so this catches multi-byte
+        # characters that fit under 72 chars but not 72 bytes.
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Password must not exceed 72 UTF-8 bytes")
+        return value
 
 
 class UserLoginIn(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(max_length=72)
 
-    _validate_password = field_validator("password")(_validate_password_length)
+    @field_validator("password")
+    @classmethod
+    def password_bytes(cls, value):
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Password must not exceed 72 UTF-8 bytes")
+        return value
 
 
 class UserOut(BaseModel):
@@ -86,28 +89,6 @@ class PlayerOut(BaseModel):
     current_cost: float
 
 
-class CoachOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    external_id: str | None
-    name: str
-    real_club: str
-    current_cost: float
-
-
-class PlayerCatalogOut(BaseModel):
-    items: list[PlayerOut]
-    total: int
-    limit: int
-    offset: int
-
-
-class PlayerFacetsOut(BaseModel):
-    clubs: list[str]
-    positions: list[str]
-
-
 class PlayerSeasonStats(BaseModel):
     total_raw_points: float
     matchdays_played: int
@@ -151,6 +132,7 @@ class MatchdayOut(_MatchdayDisplayLabelMixin, BaseModel):
     label: str
     number: int
     status: str
+    deadline: datetime | None = None
 
 
 class MatchOut(BaseModel):
@@ -189,10 +171,45 @@ class MatchDetailOut(MatchOut):
     player_stats: list[PlayerStatOut]
 
 
+class TopPerformerOut(BaseModel):
+    player_id: uuid.UUID
+    player_name: str
+    real_club: str
+    raw_points: float
+
+
+class PlayerCatalogOut(BaseModel):
+    items: list[PlayerOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class PlayerFacetsOut(BaseModel):
+    clubs: list[str]
+    positions: list[str]
+
+
+Formation = Literal["THREE_THREE", "FOUR_TWO", "TWO_FOUR"]
+
+
+class LineupValidationIn(BaseModel):
+    formation: Formation
+    active_player_ids: list[uuid.UUID] = Field(min_length=7, max_length=7)
+    captain_id: uuid.UUID
+    competition_id: uuid.UUID | None = None
+
+
+class LineupValidationOut(BaseModel):
+    valid: Literal[True] = True
+    formation: Formation
+    counts: dict[str, int]
+
+
 class TeamCreateIn(BaseModel):
     competition_id: uuid.UUID
-    name: str
-    player_ids: list[uuid.UUID]
+    name: str = Field(min_length=1, max_length=40)
+    player_ids: list[uuid.UUID] = Field(min_length=11, max_length=11)
     coach_id: uuid.UUID
 
 
@@ -202,9 +219,13 @@ class RosterEntryOut(BaseModel):
     name: str
     real_club: str
     purchase_price: float
+    position: str | None
+    current_cost: float
 
 
 class TeamOut(BaseModel):
+    competition_id: uuid.UUID
+    version: int
     id: uuid.UUID
     league_id: uuid.UUID
     season_id: uuid.UUID
@@ -222,11 +243,30 @@ class TransferIn(BaseModel):
     add_entity_id: uuid.UUID
 
 
-class TopPerformerOut(BaseModel):
-    player_id: uuid.UUID
-    player_name: str
+class CoachOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
     real_club: str
-    raw_points: float
+    current_cost: float
+
+
+class SavedLineupIn(BaseModel):
+    formation: Formation
+    active_player_ids: list[uuid.UUID] = Field(min_length=7, max_length=7)
+    captain_id: uuid.UUID
+    expected_version: int = Field(ge=0)
+
+
+class SavedLineupOut(BaseModel):
+    team_id: uuid.UUID
+    matchday_id: uuid.UUID
+    formation: Formation | None
+    active_player_ids: list[uuid.UUID]
+    bench_player_ids: list[uuid.UUID]
+    captain_id: uuid.UUID | None
+    coach_id: uuid.UUID | None
+    version: int
 
 
 class MatchdaySummary(_MatchdayDisplayLabelMixin, BaseModel):

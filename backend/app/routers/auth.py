@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
@@ -23,7 +24,11 @@ async def register(body: UserRegisterIn, db: AsyncSession = Depends(get_db)) -> 
         display_name=body.display_name,
     )
     db.add(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Email already registered")
     await db.refresh(user)
 
     return TokenOut(access_token=create_access_token(user.id))

@@ -6,7 +6,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import Response
 
 from app.core.config import settings
-from app.routers import auth, coaches, competitions, home, matchdays, matches, players, teams
+from app.routers import auth, coaches, competitions, home, lineups, matchdays, matches, players, teams
 
 app = FastAPI(title="Waterpolo Fantasy API")
 
@@ -23,7 +23,7 @@ _CACHEABLE_PREFIXES = (
 # Per-user or financial -- explicit `private, no-store` rather than just
 # omitting a cache header, per the frontend session's review: don't rely on
 # "no header" to mean "don't cache" for an intermediate proxy/CDN.
-_PRIVATE_PREFIXES = ("/api/auth", "/api/teams")
+_PRIVATE_PREFIXES = ("/api/auth", "/api/teams", "/api/lineups")
 
 
 class CacheControlMiddleware(BaseHTTPMiddleware):
@@ -86,12 +86,13 @@ app.add_middleware(CacheControlMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.include_router(auth.router)
+app.include_router(coaches.router)
 app.include_router(competitions.router)
 app.include_router(players.router)
-app.include_router(coaches.router)
+app.include_router(teams.router)
+app.include_router(lineups.router)
 app.include_router(matches.router)
 app.include_router(matchdays.router)
-app.include_router(teams.router)
 app.include_router(home.router)
 
 
