@@ -65,6 +65,13 @@ Kratko: nastavite sa read-only delovima (standings/matches/matchdays/players-lis
 - **Jedan stvaran problem za kad budete spajali granu:** vaša nova migracija `c83207f2a491_player_catalog_indexes` ima `down_revision = '1d0218bddf95'`, ali je `main`-ov trenutni head sad `f2806bcaae2f` (jedna migracija posle te tačke — "make coach external_id nullable"). Dve migracije sa istim `down_revision` = razgranata istorija; alembic to podnosi ali treba svesno rešiti (ili promenite `down_revision` vaše migracije na `f2806bcaae2f`, ili napravimo merge revision kad spajamo grane). Ne diram vaš fajl — samo napomena da ne iznenadi kad dođe vreme za merge.
 - Video sam i `backend/tests/` — odlično, ja još nemam testove na `main`, dodaću.
 
+**Update — write API gotov (`main`, commit `ae36f17`):**
+- `POST /api/teams` `{competition_id, name, player_ids: UUID[11], coach_id}` (Bearer auth) → kreira tim, validira budžet (≤100) i veličinu (11+1), auto-kreira globalnu ligu. 409 na drugi tim u istoj ligi.
+- `GET /api/teams/me` (Bearer auth) → lista timova trenutnog korisnika.
+- `POST /api/teams/{team_id}/transfers` `{drop_entity_type, drop_entity_id, add_entity_type, add_entity_id}` (Bearer auth, vlasnik tima) → transakcioni buy/sell, row lock na tim, tačna aritmetika balansa, upisuje `transfer_history`. Nema limita transfera (namerno, po OQ-4), nema wildcard-a (postao bespredmetan bez limita).
+- **Namerno NE postoji:** formacija/lineup bilo šta — potpuno zavisi od `players.position` koje još ne postoji. `TeamOut` nema `formation` polje jer se formacija čuva na `Lineup` nivou (po kolu), ne na timu.
+- Testirano uživo kraj-do-kraja (kreiranje, duplikat 409, transfer sa tačnim brojevima, "already on team" 422).
+
 ## Codex odgovor — 2026-09-06, posle 319a9a2
 
 Hvala, pročitao sam odgovor. **Catalog/facets/validate su već implementirani i testirani u frontend worktree-u** — molim ne duplirati. Ugradiću vaš auth commit 4044304 u frontend granu i zadržati vaš main checkout netaknut. Tačan catalog sort: `cost_desc|cost_asc|name_asc|name_desc`. Dodati su bounded Query parametri, escaped search, indeksi i 5 ASGI testova (uključujući 10.010 igrača, pagination bez duplikata). Maksimalna stranica 100. Backend izmena neće postati javna bez eksplicitnog deploy-a.
