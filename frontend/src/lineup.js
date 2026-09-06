@@ -1,13 +1,151 @@
-export const FORMATIONS={
- THREE_THREE:{label:'3×3',name:'Standardna lepeza',description:'Jedan centar i jedan bek. Balans u oba pravca.',roles:['GK','OT','OT','OT','OT','CF','CB'],positions:[[50,91],[15,32],[29,57],[71,57],[85,32],[50,22],[50,70]]},
- FOUR_TWO:{label:'4×2',name:'Napadačka postava',description:'Dva centra, bez beka. Pritisak pred golom.',roles:['GK','OT','OT','OT','OT','CF','CF'],positions:[[50,91],[14,56],[38,64],[62,64],[86,56],[33,24],[67,24]]},
- TWO_FOUR:{label:'2×4',name:'Odbrambena postava',description:'Dva beka, bez centra. Sigurnost iza lopte.',roles:['GK','OT','OT','OT','OT','CB','CB'],positions:[[50,91],[14,27],[38,25],[62,25],[86,27],[33,60],[67,60]]}
+export const FORMATIONS = {
+  THREE_THREE: {
+    label: "3×3",
+    name: "Standardna lepeza",
+    description: "Jedan centar i jedan bek. Balans u oba pravca.",
+    roles: ["GK", "OT", "OT", "OT", "OT", "CF", "CB"],
+    positions: [
+      [50, 91],
+      [15, 32],
+      [29, 57],
+      [71, 57],
+      [85, 32],
+      [50, 22],
+      [50, 70],
+    ],
+  },
+  FOUR_TWO: {
+    label: "4×2",
+    name: "Napadačka postava",
+    description: "Dva centra, bez beka. Pritisak pred golom.",
+    roles: ["GK", "OT", "OT", "OT", "OT", "CF", "CF"],
+    positions: [
+      [50, 91],
+      [14, 56],
+      [38, 64],
+      [62, 64],
+      [86, 56],
+      [33, 24],
+      [67, 24],
+    ],
+  },
+  TWO_FOUR: {
+    label: "2×4",
+    name: "Odbrambena postava",
+    description: "Dva beka, bez centra. Sigurnost iza lopte.",
+    roles: ["GK", "OT", "OT", "OT", "OT", "CB", "CB"],
+    positions: [
+      [50, 91],
+      [14, 27],
+      [38, 25],
+      [62, 25],
+      [86, 27],
+      [33, 60],
+      [67, 60],
+    ],
+  },
 };
-export const BENCH_ROLES=['GK','CF_CB','OT','OT'];
-export const roleAccepts=(role,position)=>role==='CF_CB'?['CF','CB'].includes(position):role===position;
-export function autoLineup(formation,roster,previous=[]){const roles=FORMATIONS[formation].roles,used=new Set();return roles.map((role,i)=>{const old=roster.find(p=>p.id===previous[i]&&p.position===role&&!used.has(p.id));const p=old||roster.find(p=>p.position===role&&!used.has(p.id));if(p)used.add(p.id);return p?.id||null})}
-export function lineupErrors(formation,active,roster,captain){const f=FORMATIONS[formation];if(!f)return ['Nepoznata formacija.'];const errors=[];if(active.length!==7||active.some(id=>!id))errors.push('Popuni svih 7 mesta u bazenu.');const ids=active.filter(Boolean);if(new Set(ids).size!==ids.length)errors.push('Igrač ne može zauzimati dva mesta.');f.roles.forEach((role,i)=>{if(!active[i])return;const p=roster.find(p=>p.id===active[i]);if(!p)errors.push('Igrač nije u tvom timu.');else if(p.position!==role)errors.push(`Mesto ${i+1} zahteva ${role}, a ${p.name} je ${p.position||'bez pozicije'}.`)});if(!captain||!ids.includes(captain))errors.push('Izaberi kapitena među starterima.');return [...new Set(errors)]}
-export function rosterErrors(roster,active){const bench=roster.filter(p=>!active.includes(p.id));if(roster.length!==11)return ['Tim treba da ima 11 igrača i trenera.'];const roles=[...BENCH_ROLES],remaining=[...bench];for(const role of roles){const idx=remaining.findIndex(p=>roleAccepts(role,p.position));if(idx<0)return ['Klupa zahteva 1 GK, 1 CF/CB i 2 OT.'];remaining.splice(idx,1)}return remaining.length?['Previše igrača na klupi.']:[]}
-export function changeFormation(draft,formation){if(!FORMATIONS[formation])throw new Error('Unknown formation');const active=autoLineup(formation,draft.roster,draft.active);return {...draft,formation,active,captain:active.includes(draft.captain)?draft.captain:active.find(Boolean)||null}}
-export function buyPlayer(draft,player,replaceId=null){if(!player.position)throw new Error('Igrač nema potvrđenu poziciju.');if(draft.roster.some(p=>p.id===player.id))throw new Error('Igrač je već u timu.');const outgoing=draft.roster.find(p=>p.id===replaceId);if(!outgoing&&draft.roster.length>=11)throw new Error('Tim je pun. Izaberi igrača za zamenu.');const cost=draft.roster.reduce((s,p)=>s+p.current_cost,0)-(outgoing?.current_cost||0)+player.current_cost+(draft.coach?.current_cost||0);if(cost>100+1e-6)throw new Error('Nemaš dovoljno kredita.');const roster=[...draft.roster.filter(p=>p.id!==replaceId),player];const active=draft.active.map(id=>id===replaceId?null:id);return changeFormation({...draft,roster,active},draft.formation)}
-export function safeDraft(raw,fallback){if(!raw||!FORMATIONS[raw.formation]||!Array.isArray(raw.roster)||raw.roster.length>11||raw.roster.some(p=>typeof p.id!=='string'||typeof p.name!=='string'||!Number.isFinite(p.current_cost)||p.current_cost<0)||new Set(raw.roster.map(p=>p.id)).size!==raw.roster.length)return structuredClone(fallback);return {...structuredClone(fallback),...raw,name:String(raw.name||fallback.name).slice(0,40),active:Array.isArray(raw.active)&&raw.active.length===7?raw.active:Array(7).fill(null)}}
+export const BENCH_ROLES = ["GK", "CF_CB", "OT", "OT"];
+export const roleAccepts = (role, position) =>
+  role === "CF_CB" ? ["CF", "CB"].includes(position) : role === position;
+export function autoLineup(formation, roster, previous = []) {
+  const roles = FORMATIONS[formation].roles,
+    used = new Set();
+  return roles.map((role, i) => {
+    const old = roster.find(
+      (p) => p.id === previous[i] && p.position === role && !used.has(p.id),
+    );
+    const p = old || roster.find((p) => p.position === role && !used.has(p.id));
+    if (p) used.add(p.id);
+    return p?.id || null;
+  });
+}
+export function lineupErrors(formation, active, roster, captain) {
+  const f = FORMATIONS[formation];
+  if (!f) return ["Nepoznata formacija."];
+  const errors = [];
+  if (active.length !== 7 || active.some((id) => !id))
+    errors.push("Popuni svih 7 mesta u bazenu.");
+  const ids = active.filter(Boolean);
+  if (new Set(ids).size !== ids.length)
+    errors.push("Igrač ne može zauzimati dva mesta.");
+  f.roles.forEach((role, i) => {
+    if (!active[i]) return;
+    const p = roster.find((p) => p.id === active[i]);
+    if (!p) errors.push("Igrač nije u tvom timu.");
+    else if (p.position !== role)
+      errors.push(
+        `Mesto ${i + 1} zahteva ${role}, a ${p.name} je ${p.position || "bez pozicije"}.`,
+      );
+  });
+  if (!captain || !ids.includes(captain))
+    errors.push("Izaberi kapitena među starterima.");
+  return [...new Set(errors)];
+}
+export function rosterErrors(roster, active) {
+  const bench = roster.filter((p) => !active.includes(p.id));
+  if (roster.length !== 11) return ["Tim treba da ima 11 igrača i trenera."];
+  const roles = [...BENCH_ROLES],
+    remaining = [...bench];
+  for (const role of roles) {
+    const idx = remaining.findIndex((p) => roleAccepts(role, p.position));
+    if (idx < 0) return ["Klupa zahteva 1 GK, 1 CF/CB i 2 OT."];
+    remaining.splice(idx, 1);
+  }
+  return remaining.length ? ["Previše igrača na klupi."] : [];
+}
+export function changeFormation(draft, formation) {
+  if (!FORMATIONS[formation]) throw new Error("Unknown formation");
+  const active = autoLineup(formation, draft.roster, draft.active);
+  return {
+    ...draft,
+    formation,
+    active,
+    captain: active.includes(draft.captain)
+      ? draft.captain
+      : active.find(Boolean) || null,
+  };
+}
+export function buyPlayer(draft, player, replaceId = null) {
+  if (!player.position) throw new Error("Igrač nema potvrđenu poziciju.");
+  if (draft.roster.some((p) => p.id === player.id))
+    throw new Error("Igrač je već u timu.");
+  const outgoing = draft.roster.find((p) => p.id === replaceId);
+  if (!outgoing && draft.roster.length >= 11)
+    throw new Error("Tim je pun. Izaberi igrača za zamenu.");
+  const cost =
+    draft.roster.reduce((s, p) => s + p.current_cost, 0) -
+    (outgoing?.current_cost || 0) +
+    player.current_cost +
+    (draft.coach?.current_cost || 0);
+  if (cost > 100 + 1e-6) throw new Error("Nemaš dovoljno kredita.");
+  const roster = [...draft.roster.filter((p) => p.id !== replaceId), player];
+  const active = draft.active.map((id) => (id === replaceId ? null : id));
+  return changeFormation({ ...draft, roster, active }, draft.formation);
+}
+export function safeDraft(raw, fallback) {
+  if (
+    !raw ||
+    !FORMATIONS[raw.formation] ||
+    !Array.isArray(raw.roster) ||
+    raw.roster.length > 11 ||
+    raw.roster.some(
+      (p) =>
+        typeof p.id !== "string" ||
+        typeof p.name !== "string" ||
+        !Number.isFinite(p.current_cost) ||
+        p.current_cost < 0,
+    ) ||
+    new Set(raw.roster.map((p) => p.id)).size !== raw.roster.length
+  )
+    return structuredClone(fallback);
+  return {
+    ...structuredClone(fallback),
+    ...raw,
+    name: String(raw.name || fallback.name).slice(0, 40),
+    active:
+      Array.isArray(raw.active) && raw.active.length === 7
+        ? raw.active
+        : Array(7).fill(null),
+  };
+}

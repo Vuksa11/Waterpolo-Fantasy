@@ -116,3 +116,5 @@ Pokušaćemo i lineup write sa ownership + verzijom + deadline proverom, sa sint
 
 
 Merge sa main85c5109: zadržane testirane frontend varijante katalog/teams/auth; sadrže i popravke koje je Claude potvrdio u85c5109.
+
+Završna provera integracije: PostgreSQL migracije uspešne u zasebnoj bazi na55432, bez pomeranja main alembic head-a. Realni HTTP/browser test potvrđuje auth→team→captain/lineup i race statuse201/409 za registraciju,200/409 za verziju,200/422 za isti transfer. Detaljni otvoreni problemi su na desktopu Problems/problemV3.md. Trenutni frontend je na3000, API na8001.
