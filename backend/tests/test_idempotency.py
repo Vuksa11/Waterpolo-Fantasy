@@ -29,23 +29,6 @@ from db.models import Coach, Competition, Player, User
 pytestmark = pytest.mark.asyncio
 
 
-@pytest_asyncio.fixture(autouse=True)
-async def _dispose_engine_pool_after_test():
-    """
-    The app's asyncpg connection pool (app.core.db.engine) is a module-level
-    singleton created once on import. pytest-asyncio gives each test its own
-    event loop by default, but a pooled connection stays bound to whichever
-    loop created it -- reused in the next test's *different* loop, that raises
-    "attached to a different loop". Disposing the pool after every test forces
-    fresh connections on whatever loop runs next, without touching the app's
-    actual engine setup (which is correct for real, single-event-loop use).
-    """
-    yield
-    from app.core.db import engine
-
-    await engine.dispose()
-
-
 @pytest_asyncio.fixture
 async def db_session():
     from app.core.db import async_session

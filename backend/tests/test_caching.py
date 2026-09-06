@@ -17,14 +17,6 @@ from db.models import Competition
 pytestmark = pytest.mark.asyncio
 
 
-@pytest_asyncio.fixture(autouse=True)
-async def _dispose_engine_pool_after_test():
-    yield
-    from app.core.db import engine
-
-    await engine.dispose()
-
-
 @pytest_asyncio.fixture
 async def client():
     transport = ASGITransport(app=app)

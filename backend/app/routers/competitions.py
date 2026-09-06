@@ -1,13 +1,13 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import get_or_compute_json
 from app.core.db import get_db
-from app.schemas import CompetitionOut, MatchdayOut, StandingsRow
-from db.models import Competition, Match, Matchday, MatchStatus, Season
+from app.schemas import CompetitionOut, LeaderboardOut, MatchdayOut, StandingsRow
+from db.models import Competition, FantasyTeam, League, Match, Matchday, MatchStatus, Season, User
 
 router = APIRouter(prefix="/api/competitions", tags=["competitions"])
 
@@ -104,3 +104,84 @@ async def list_matchdays(competition_id: uuid.UUID, db: AsyncSession = Depends(g
     )
     matchdays = result.scalars().all()
     return [MatchdayOut.model_validate(md) for md in matchdays]
+
+
+@router.get("/{competition_id}/leaderboard", response_model=LeaderboardOut)
+async def get_leaderboard(
+    competition_id: uuid.UUID,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> LeaderboardOut:
+    """
+    Ranks fantasy teams in the one global public league for this
+    competition's latest season by `total_points`, highest first (ties
+    broken by team creation order, oldest first, for stable pagination).
+
+    Known gap, not fixed here (see docs/Fantasy_Waterpolo_Arhitektura_v2.md,
+    Section 7, item 8): nothing currently aggregates a matchday's
+    fantasy_scores into a team's total_points based on its saved lineup --
+    that's deferred until players.position exists and lineup management is
+    unblocked. Until then every team's total_points stays at its default
+    (0), so this endpoint is correct in shape but shows an all-zero
+    leaderboard on real data today. Built now anyway since it's independent
+    of that blocker and the ranking/pagination logic won't need to change
+    once scoring is wired up -- only the numbers will.
+
+    Cached (Phase 2 of the performance plan), same pattern as standings.
+    """
+    cache_key = f"leaderboard:v1:{competition_id}:{limit}:{offset}"
+    data = await get_or_compute_json(cache_key, lambda: _compute_leaderboard(competition_id, limit, offset, db))
+    return LeaderboardOut(**data)
+
+
+async def _compute_leaderboard(competition_id: uuid.UUID, limit: int, offset: int, db: AsyncSession) -> dict:
+    season = await db.scalar(
+        select(Season)
+        .where(Season.competition_id == competition_id)
+        .order_by(Season.start_date.desc(), Season.id)
+        .limit(1)
+    )
+    if season is None:
+        raise HTTPException(status_code=404, detail="No season found for this competition")
+
+    league = await db.scalar(select(League).where(League.season_id == season.id, League.admin_id.is_(None)))
+    if league is None:
+        # Nobody has created a team in this competition yet -- the global
+        # league is provisioned lazily by POST /api/teams, never by a read.
+        return {
+            "competition_id": str(competition_id),
+            "league_id": None,
+            "total": 0,
+            "limit": limit,
+            "offset": offset,
+            "entries": [],
+        }
+
+    total = await db.scalar(select(func.count()).select_from(FantasyTeam).where(FantasyTeam.league_id == league.id))
+    result = await db.execute(
+        select(FantasyTeam, User.display_name)
+        .join(User, User.id == FantasyTeam.user_id)
+        .where(FantasyTeam.league_id == league.id)
+        .order_by(FantasyTeam.total_points.desc(), FantasyTeam.created_at.asc(), FantasyTeam.id.asc())
+        .limit(limit)
+        .offset(offset)
+    )
+    entries = [
+        {
+            "rank": offset + i + 1,
+            "team_id": str(team.id),
+            "team_name": team.name,
+            "owner_display_name": display_name,
+            "total_points": float(team.total_points),
+        }
+        for i, (team, display_name) in enumerate(result.all())
+    ]
+    return {
+        "competition_id": str(competition_id),
+        "league_id": str(league.id),
+        "total": total or 0,
+        "limit": limit,
+        "offset": offset,
+        "entries": entries,
+    }

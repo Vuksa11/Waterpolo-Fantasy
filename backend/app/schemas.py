@@ -67,6 +67,26 @@ class CompetitionOut(BaseModel):
     schedule_url: str | None
 
 
+class LeaderboardEntryOut(BaseModel):
+    rank: int
+    team_id: uuid.UUID
+    team_name: str
+    owner_display_name: str
+    total_points: float
+
+
+class LeaderboardOut(BaseModel):
+    competition_id: uuid.UUID
+    # None means no one has created a team in this competition yet -- the
+    # global league is created lazily on first POST /api/teams, never by a
+    # read endpoint (a GET must not have side effects).
+    league_id: uuid.UUID | None
+    total: int
+    limit: int
+    offset: int
+    entries: list[LeaderboardEntryOut]
+
+
 class StandingsRow(BaseModel):
     club: str
     played: int
