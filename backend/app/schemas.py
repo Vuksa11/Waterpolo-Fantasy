@@ -140,6 +140,39 @@ class MatchDetailOut(MatchOut):
     player_stats: list[PlayerStatOut]
 
 
+class TeamCreateIn(BaseModel):
+    competition_id: uuid.UUID
+    name: str
+    player_ids: list[uuid.UUID]
+    coach_id: uuid.UUID
+
+
+class RosterEntryOut(BaseModel):
+    entity_type: str
+    entity_id: uuid.UUID
+    name: str
+    real_club: str
+    purchase_price: float
+
+
+class TeamOut(BaseModel):
+    id: uuid.UUID
+    league_id: uuid.UUID
+    season_id: uuid.UUID
+    name: str
+    credit_balance: float
+    total_points: float
+    wildcard_used: bool
+    roster: list[RosterEntryOut]
+
+
+class TransferIn(BaseModel):
+    drop_entity_type: str
+    drop_entity_id: uuid.UUID
+    add_entity_type: str
+    add_entity_id: uuid.UUID
+
+
 class TopPerformerOut(BaseModel):
     player_id: uuid.UUID
     player_name: str
