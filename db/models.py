@@ -18,6 +18,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -135,7 +136,7 @@ class Season(Base):
     __tablename__ = "seasons"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    competition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("competitions.id"), nullable=False)
+    competition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("competitions.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[SeasonStatus] = mapped_column(Enum(SeasonStatus, name="season_status"), nullable=False)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -146,7 +147,7 @@ class Matchday(Base):
     __tablename__ = "matchdays"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    season_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("seasons.id"), nullable=False)
+    season_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("seasons.id"), nullable=False, index=True)
     # The site's own round label (e.g. "Round 7", but also non-numeric playoff
     # rounds like "Semifinal" / "Bronze medal" / "Final" -- confirmed on a real
     # season). This, not `number`, is the actual identity of a matchday within
@@ -167,7 +168,7 @@ class Match(Base):
     __tablename__ = "matches"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    matchday_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matchdays.id"), nullable=False)
+    matchday_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matchdays.id"), nullable=False, index=True)
     external_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     home_club: Mapped[str] = mapped_column(String, nullable=False)
     away_club: Mapped[str] = mapped_column(String, nullable=False)
@@ -185,7 +186,7 @@ class Player(Base):
     __tablename__ = "players"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    competition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("competitions.id"), nullable=False)
+    competition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("competitions.id"), nullable=False, index=True)
     external_id: Mapped[str | None] = mapped_column(String)
     name: Mapped[str] = mapped_column(String, nullable=False)
     # Nullable: the match box score distinguishes goalkeepers from field
@@ -206,7 +207,7 @@ class Coach(Base):
     __tablename__ = "coaches"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    competition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("competitions.id"), nullable=False)
+    competition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("competitions.id"), nullable=False, index=True)
     # Nullable: no coach data source has been scraped yet (see docs, Section
     # 7). Coaches are currently generic placeholders created directly in the
     # database (one per club, name suffixed "— trener TBD"), with no external
@@ -229,7 +230,7 @@ class League(Base):
     __tablename__ = "leagues"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    season_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("seasons.id"), nullable=False)
+    season_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("seasons.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     visibility: Mapped[LeagueVisibility] = mapped_column(
         Enum(LeagueVisibility, name="league_visibility"), nullable=False, default=LeagueVisibility.PUBLIC
@@ -243,8 +244,8 @@ class FantasyTeam(Base):
     __tablename__ = "fantasy_teams"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
-    league_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("leagues.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    league_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("leagues.id"), nullable=False, index=True)
     season_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("seasons.id"), nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     credit_balance: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False, default=100)
@@ -259,7 +260,9 @@ class Roster(Base):
     __tablename__ = "rosters"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    fantasy_team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("fantasy_teams.id"), nullable=False)
+    fantasy_team_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("fantasy_teams.id"), nullable=False, index=True
+    )
     entity_type: Mapped[EntityType] = mapped_column(Enum(EntityType, name="entity_type"), nullable=False)
     entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     purchase_price: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
@@ -272,8 +275,10 @@ class Lineup(Base):
     __tablename__ = "lineups"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    fantasy_team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("fantasy_teams.id"), nullable=False)
-    matchday_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matchdays.id"), nullable=False)
+    fantasy_team_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("fantasy_teams.id"), nullable=False, index=True
+    )
+    matchday_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matchdays.id"), nullable=False, index=True)
     formation: Mapped[Formation] = mapped_column(Enum(Formation, name="formation"), nullable=False)
     entity_type: Mapped[EntityType] = mapped_column(Enum(EntityType, name="entity_type"), nullable=False)
     entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
@@ -288,8 +293,8 @@ class PlayerStat(Base):
     __tablename__ = "player_stats"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    match_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matches.id"), nullable=False)
-    player_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("players.id"), nullable=False)
+    match_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matches.id"), nullable=False, index=True)
+    player_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("players.id"), nullable=False, index=True)
     goals: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     assists: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     fouls_drawn: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -311,8 +316,8 @@ class CoachStat(Base):
     __tablename__ = "coach_stats"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    match_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matches.id"), nullable=False)
-    coach_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("coaches.id"), nullable=False)
+    match_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matches.id"), nullable=False, index=True)
+    coach_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("coaches.id"), nullable=False, index=True)
     goals_for: Mapped[int] = mapped_column(Integer, nullable=False)
     goals_against: Mapped[int] = mapped_column(Integer, nullable=False)
     result: Mapped[CoachResult] = mapped_column(Enum(CoachResult, name="coach_result"), nullable=False)
@@ -324,6 +329,12 @@ class FantasyScore(Base):
     """Calculated fantasy points per player or coach per matchday. Polymorphic entity reference."""
 
     __tablename__ = "fantasy_scores"
+    __table_args__ = (
+        # The natural lookup key for every query this table actually gets
+        # (recompute upsert, a player's season total, top-performers) --
+        # without it each of those is a full scan once this table is large.
+        Index("ix_fantasy_scores_matchday_entity", "matchday_id", "entity_type", "entity_id"),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     matchday_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matchdays.id"), nullable=False)
@@ -341,7 +352,9 @@ class TransferHistoryEntry(Base):
     __tablename__ = "transfer_history"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    fantasy_team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("fantasy_teams.id"), nullable=False)
+    fantasy_team_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("fantasy_teams.id"), nullable=False, index=True
+    )
     matchday_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("matchdays.id"), nullable=False)
     action: Mapped[TransferAction] = mapped_column(Enum(TransferAction, name="transfer_action"), nullable=False)
     entity_type: Mapped[EntityType] = mapped_column(Enum(EntityType, name="entity_type"), nullable=False)
@@ -356,6 +369,12 @@ class PriceHistoryEntry(Base):
     """Log of player/coach credit cost changes between matchdays. Polymorphic entity reference."""
 
     __tablename__ = "price_history"
+    __table_args__ = (
+        # A player's full price history is the only query pattern this table
+        # serves today (get_player detail) -- filtered by entity, then joined
+        # to matchdays for ordering.
+        Index("ix_price_history_entity", "entity_type", "entity_id"),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     entity_type: Mapped[EntityType] = mapped_column(Enum(EntityType, name="entity_type"), nullable=False)

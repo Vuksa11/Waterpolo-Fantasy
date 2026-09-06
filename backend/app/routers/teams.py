@@ -95,11 +95,35 @@ async def _get_entity(db: AsyncSession, entity_type: str, entity_id: uuid.UUID):
 
 
 async def _roster_out(db: AsyncSession, team_id: uuid.UUID) -> list[RosterEntryOut]:
+    """
+    Batched, not N+1: one query for every player on the roster and one for
+    every coach, instead of a separate round-trip per roster row (12 per
+    team, previously) -- matters once this runs under real concurrent load,
+    see docs/FRONTEND_BACKEND_HANDOFF.md performance plan.
+    """
     result = await db.execute(select(Roster).where(Roster.fantasy_team_id == team_id))
     entries = result.scalars().all()
+
+    player_ids = [r.entity_id for r in entries if r.entity_type == EntityType.PLAYER]
+    coach_ids = [r.entity_id for r in entries if r.entity_type == EntityType.COACH]
+
+    players_by_id: dict[uuid.UUID, Player] = {}
+    if player_ids:
+        rows = await db.execute(select(Player).where(Player.id.in_(player_ids)))
+        players_by_id = {p.id: p for p in rows.scalars().all()}
+
+    coaches_by_id: dict[uuid.UUID, Coach] = {}
+    if coach_ids:
+        rows = await db.execute(select(Coach).where(Coach.id.in_(coach_ids)))
+        coaches_by_id = {c.id: c for c in rows.scalars().all()}
+
     out = []
     for r in entries:
-        entity = await _get_entity(db, r.entity_type.value, r.entity_id)
+        entity = (
+            players_by_id.get(r.entity_id)
+            if r.entity_type == EntityType.PLAYER
+            else coaches_by_id.get(r.entity_id)
+        )
         if entity is None:
             continue
         out.append(

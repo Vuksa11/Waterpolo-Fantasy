@@ -1,8 +1,33 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
+from app.core.config import settings
 from app.routers import auth, coaches, competitions, matchdays, matches, players, teams
 
 app = FastAPI(title="Waterpolo Fantasy API")
+
+# Read-only, shared (not per-user) data -- only changes when the scraper
+# writes new results, never per-request. Explicitly excludes /api/teams and
+# /api/auth: those are per-user, and a shared/public Cache-Control on a URL
+# that doesn't vary by user would leak one user's data to another's cache.
+_CACHEABLE_PREFIXES = ("/api/competitions", "/api/players", "/api/coaches", "/api/matches", "/api/matchdays")
+
+
+class CacheControlMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if (
+            request.method == "GET"
+            and request.url.path.startswith(_CACHEABLE_PREFIXES)
+            and response.status_code == 200
+        ):
+            response.headers["Cache-Control"] = f"public, max-age={settings.cache_control_max_age_seconds}"
+        return response
+
+
+app.add_middleware(CacheControlMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.include_router(auth.router)
 app.include_router(competitions.router)
