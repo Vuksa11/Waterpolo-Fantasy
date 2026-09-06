@@ -208,3 +208,29 @@ class TopPerformerOut(BaseModel):
     player_name: str
     real_club: str
     raw_points: float
+
+
+class MatchdaySummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    label: str
+    number: int
+    status: str
+    deadline: datetime | None
+
+
+class HomeOut(BaseModel):
+    """
+    GET /api/home contract -- agreed with the frontend session
+    (docs/FRONTEND_BACKEND_HANDOFF.md) specifically to avoid a 4-5 request
+    waterfall for the page most users land on first. Deliberately excludes
+    anything private (a user's own team) or not shown on that page (full
+    catalog, all coaches, top performers) -- those stay separate calls.
+    """
+
+    competition_id: uuid.UUID
+    selected_matchday: MatchdaySummary | None
+    matches: list[MatchOut]
+    standings_top4: list[StandingsRow]
+    updated_at: datetime

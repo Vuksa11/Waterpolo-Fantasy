@@ -396,3 +396,29 @@ class ScrapeRun(Base):
     matches_processed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     notes: Mapped[str | None] = mapped_column(Text)
+
+
+class IdempotencyKey(Base):
+    """
+    Lets a client safely retry a write (e.g. after a network timeout) without
+    risking a duplicate team/transfer -- proposed by the frontend session's
+    performance review (docs/FRONTEND_BACKEND_HANDOFF.md): a client-supplied
+    `Idempotency-Key` header, scoped per (user, endpoint, key). A repeated
+    request with the same key returns the original response instead of
+    re-running the operation. Written in the same transaction as the write it
+    guards, so it never exists without the operation it recorded actually
+    having committed.
+    """
+
+    __tablename__ = "idempotency_keys"
+    __table_args__ = (
+        Index("ix_idempotency_keys_lookup", "user_id", "endpoint", "key", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    endpoint: Mapped[str] = mapped_column(String, nullable=False)
+    key: Mapped[str] = mapped_column(String, nullable=False)
+    response_status: Mapped[int] = mapped_column(Integer, nullable=False)
+    response_body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)

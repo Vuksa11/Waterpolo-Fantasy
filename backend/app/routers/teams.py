@@ -15,7 +15,7 @@ and budget, not position mix.
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,7 @@ from db.models import (
     Coach,
     EntityType,
     FantasyTeam,
+    IdempotencyKey,
     League,
     LeagueVisibility,
     Matchday,
@@ -42,6 +43,47 @@ router = APIRouter(prefix="/api/teams", tags=["teams"])
 
 ROSTER_PLAYER_COUNT = 11  # 2 GK + 9 field players
 BUDGET = 100.0
+
+
+async def _get_idempotent_replay(
+    db: AsyncSession, user_id: uuid.UUID, endpoint: str, key: str | None
+) -> TeamOut | None:
+    """
+    If this exact (user, endpoint, key) already succeeded, return that
+    original response instead of re-running the operation -- proposed by the
+    frontend session's performance review, for a client retrying after a
+    network timeout without risking a duplicate team/transfer.
+
+    Known simplification: doesn't hash/compare the request body, so reusing
+    the same key with a genuinely different payload silently replays the
+    first response rather than 409ing on the mismatch. Fine as long as the
+    frontend generates a fresh key per logical operation (not per click);
+    revisit if that assumption ever breaks.
+    """
+    if key is None:
+        return None
+    row = await db.scalar(
+        select(IdempotencyKey).where(
+            IdempotencyKey.user_id == user_id, IdempotencyKey.endpoint == endpoint, IdempotencyKey.key == key
+        )
+    )
+    return TeamOut.model_validate_json(row.response_body) if row is not None else None
+
+
+def _record_idempotency(
+    db: AsyncSession, user_id: uuid.UUID, endpoint: str, key: str | None, status_code: int, body: TeamOut
+) -> None:
+    if key is None:
+        return
+    db.add(
+        IdempotencyKey(
+            user_id=user_id,
+            endpoint=endpoint,
+            key=key,
+            response_status=status_code,
+            response_body=body.model_dump_json(),
+        )
+    )
 
 
 async def _get_active_season(db: AsyncSession, competition_id: uuid.UUID) -> Season:
@@ -140,8 +182,15 @@ async def _roster_out(db: AsyncSession, team_id: uuid.UUID) -> list[RosterEntryO
 
 @router.post("", response_model=TeamOut, status_code=status.HTTP_201_CREATED)
 async def create_team(
-    body: TeamCreateIn, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+    body: TeamCreateIn,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> TeamOut:
+    replay = await _get_idempotent_replay(db, current_user.id, "POST /api/teams", idempotency_key)
+    if replay is not None:
+        return replay
+
     if len(set(body.player_ids)) != ROSTER_PLAYER_COUNT:
         raise HTTPException(422, f"A roster must contain exactly {ROSTER_PLAYER_COUNT} distinct players")
 
@@ -198,7 +247,7 @@ async def create_team(
     )
     await db.commit()
 
-    return TeamOut(
+    result_out = TeamOut(
         id=team.id,
         league_id=team.league_id,
         season_id=team.season_id,
@@ -208,6 +257,9 @@ async def create_team(
         wildcard_used=team.wildcard_used,
         roster=await _roster_out(db, team.id),
     )
+    _record_idempotency(db, current_user.id, "POST /api/teams", idempotency_key, status.HTTP_201_CREATED, result_out)
+    await db.commit()
+    return result_out
 
 
 @router.get("/me", response_model=list[TeamOut])
@@ -235,9 +287,15 @@ async def list_my_teams(
 async def make_transfer(
     team_id: uuid.UUID,
     body: TransferIn,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TeamOut:
+    endpoint = f"POST /api/teams/{team_id}/transfers"
+    replay = await _get_idempotent_replay(db, current_user.id, endpoint, idempotency_key)
+    if replay is not None:
+        return replay
+
     # Row-level lock on the team for the duration of this transaction --
     # two concurrent transfers on the same team must not both read the same
     # starting credit_balance (see docs, Section 5.4: "PostgreSQL's strong
@@ -319,7 +377,7 @@ async def make_transfer(
     team.credit_balance = new_balance
     await db.commit()
 
-    return TeamOut(
+    result_out = TeamOut(
         id=team.id,
         league_id=team.league_id,
         season_id=team.season_id,
@@ -329,3 +387,6 @@ async def make_transfer(
         wildcard_used=team.wildcard_used,
         roster=await _roster_out(db, team.id),
     )
+    _record_idempotency(db, current_user.id, endpoint, idempotency_key, status.HTTP_200_OK, result_out)
+    await db.commit()
+    return result_out
