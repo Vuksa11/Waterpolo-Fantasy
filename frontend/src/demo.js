@@ -1,0 +1,23 @@
+const seed=[
+{id:1,name:'Lazar Dobožanov',club:'Radnički',code:'RAD',pos:'GK',price:7.5,pts:86,no:1},
+{id:2,name:'Dušan Mandić',club:'Novi Beograd',code:'NBG',pos:'OT',price:12,pts:142,no:10},
+{id:3,name:'Vasilije Radović',club:'Jadran HN',code:'JHN',pos:'OT',price:9,pts:116,no:8},
+{id:4,name:'Nikola Jakšić',club:'Novi Beograd',code:'NBG',pos:'CB',price:10,pts:124,no:4},
+{id:5,name:'Strahinja Rašović',club:'Radnički',code:'RAD',pos:'OT',price:10.5,pts:128,no:9},
+{id:6,name:'Miroslav Perković',club:'Primorac',code:'PRI',pos:'CF',price:8.5,pts:98,no:11},
+{id:7,name:'Marko Mršić',club:'Jadran HN',code:'JHN',pos:'OT',price:7.5,pts:92,no:6},
+{id:8,name:'Petar Tešanović',club:'Primorac',code:'PRI',pos:'GK',price:8,pts:102,no:1},
+{id:9,name:'Đorđe Vučinić',club:'Partizan',code:'PAR',pos:'OT',price:6,pts:71,no:7},
+{id:10,name:'Dimitrije Rističević',club:'Partizan',code:'PAR',pos:'GK',price:6,pts:67,no:1},
+{id:11,name:'Dušan Matković',club:'Primorac',code:'PRI',pos:'OT',price:9.5,pts:112,no:3},
+{id:12,name:'Nemanja Vico',club:'Radnički',code:'RAD',pos:'CF',price:8,pts:93,no:12},
+{id:13,name:'Petar Jakšić',club:'Novi Beograd',code:'NBG',pos:'CB',price:7,pts:78,no:5},
+{id:14,name:'Luka Brguljan',club:'Primorac',code:'PRI',pos:'OT',price:7,pts:82,no:2},
+{id:15,name:'Aleksa Ukropina',club:'Jadran HN',code:'JHN',pos:'OT',price:8,pts:96,no:7},
+{id:16,name:'Vuk Milojević',club:'Crvena zvezda',code:'CZV',pos:'CF',price:6.5,pts:69,no:9}];
+
+export const demoPlayers=seed.map(p=>({id:String(p.id),name:p.name,real_club:p.club,position:p.pos,current_cost:7+(p.id%3)*.5,points:p.pts,number:p.no,external_id:String(p.id)}));
+export const demoCompetition={id:'demo',name:'VRL Premijer liga · Demo',source_slug:'demo',schedule_url:null};
+export const demoMatches=[{id:'m1',home_club:'Radnički',away_club:'Jadran HN',home_score:null,away_score:null,status:'UPCOMING',kickoff_at:'2026-09-12T18:00:00Z'},{id:'m2',home_club:'Novi Beograd',away_club:'Šabac',home_score:null,away_score:null,status:'UPCOMING',kickoff_at:'2026-09-12T16:00:00Z'},{id:'m3',home_club:'Primorac',away_club:'Partizan',home_score:13,away_score:10,status:'FINISHED',kickoff_at:'2026-09-06T17:00:00Z'},{id:'m4',home_club:'Budućnost',away_club:'Crvena zvezda',home_score:9,away_score:11,status:'FINISHED',kickoff_at:'2026-09-06T18:30:00Z'}];
+export const demoStandings=['Radnički','Jadran HN','Novi Beograd','Primorac','Crvena zvezda','Partizan','Šabac','Budućnost'].map((club,i)=>({club,played:6,won:Math.max(0,6-i),lost:Math.min(6,i),goals_for:84-i*3,goals_against:57+i*3,goal_difference:27-i*6,points:Math.max(0,18-i*3)}));
+export const demoDraft={name:'Vuksa Waterpolo',formation:'THREE_THREE',roster:demoPlayers.filter(p=>['1','2','3','4','5','6','7','8','9','11','12'].includes(p.id)),active:['1','2','3','5','7','6','4'],captain:'2',coach:{id:'demo-coach',name:'Trener · Demo',current_cost:7},savedAt:null};

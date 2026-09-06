@@ -1,12 +1,13 @@
 import uuid
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.schemas import PlayerDetailOut, PlayerOut, PlayerSeasonStats, PriceHistoryPoint
-from db.models import EntityType, FantasyScore, Matchday, Player, PriceHistoryEntry
+from app.schemas import PlayerCatalogOut, PlayerFacetsOut, PlayerDetailOut, PlayerOut, PlayerSeasonStats, PriceHistoryPoint
+from db.models import EntityType, FantasyScore, Matchday, Player, Position, PriceHistoryEntry
 
 router = APIRouter(prefix="/api/players", tags=["players"])
 
@@ -20,6 +21,51 @@ async def list_players(
         query = query.where(Player.competition_id == competition_id)
     result = await db.execute(query.order_by(Player.current_cost.desc()))
     return list(result.scalars().all())
+
+
+@router.get("/catalog", response_model=PlayerCatalogOut)
+async def player_catalog(
+    competition_id: uuid.UUID | None = None,
+    search: str | None = Query(default=None, max_length=100),
+    position: Position | None = None,
+    club: str | None = Query(default=None, max_length=200),
+    sort: Literal["cost_desc", "cost_asc", "current_cost_desc", "current_cost_asc", "name_asc", "name_desc"] = "cost_desc",
+    limit: int = Query(default=24, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> PlayerCatalogOut:
+    filters = []
+    if competition_id is not None:
+        filters.append(Player.competition_id == competition_id)
+    if search and search.strip():
+        # Treat SQL wildcard characters as literal user input.
+        term = search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        filters.append(Player.name.ilike(f"%{term}%", escape="\\"))
+    if position is not None:
+        filters.append(Player.position == position)
+    if club is not None:
+        filters.append(Player.real_club == club)
+    ordering = {
+        "cost_desc": Player.current_cost.desc(), "cost_asc": Player.current_cost.asc(),
+        "name_asc": Player.name.asc(), "name_desc": Player.name.desc(),
+        "current_cost_desc": Player.current_cost.desc(), "current_cost_asc": Player.current_cost.asc(),
+    }[sort]
+    total = await db.scalar(select(func.count()).select_from(Player).where(*filters))
+    result = await db.execute(
+        select(Player).where(*filters).order_by(ordering, Player.id).limit(limit).offset(offset)
+    )
+    return PlayerCatalogOut(items=list(result.scalars().all()), total=total or 0, limit=limit, offset=offset)
+
+
+@router.get("/facets", response_model=PlayerFacetsOut)
+async def player_facets(
+    competition_id: uuid.UUID | None = None, db: AsyncSession = Depends(get_db)
+) -> PlayerFacetsOut:
+    filters = [] if competition_id is None else [Player.competition_id == competition_id]
+    clubs = await db.execute(select(Player.real_club).where(*filters).distinct().order_by(Player.real_club))
+    # Shared contract: list supported filters even before verified positions
+    # arrive. This does not assign a position to any player.
+    return PlayerFacetsOut(clubs=list(clubs.scalars()), positions=[position.value for position in Position])
 
 
 @router.get("/{player_id}", response_model=PlayerDetailOut)

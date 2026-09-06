@@ -28,8 +28,8 @@ services:
     depends_on:
       - db
     # Dev-only convenience loop. Production uses a cron/systemd timer invoking
-    # `python run.py` directly — see docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 4.4.
-    entrypoint: ["sh", "-c", "while true; do python run.py; sleep 300; done"]
+    # `python -m scraper.run` directly — see docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 4.4.
+    entrypoint: ["sh", "-c", "while true; do python -m scraper.run; sleep 300; done"]
 
 volumes:
   db_data:

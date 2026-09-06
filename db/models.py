@@ -19,6 +19,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
+    Index,
     Numeric,
     String,
     Text,
@@ -202,6 +203,12 @@ class Player(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
+# Catalog pages and competition-scoped facets use these bounded access paths.
+Index("ix_players_competition_cost_id", Player.competition_id, Player.current_cost.desc(), Player.id)
+Index("ix_players_competition_name_id", Player.competition_id, Player.name, Player.id)
+Index("ix_players_competition_club_position", Player.competition_id, Player.real_club, Player.position)
+
+
 class Coach(Base):
     __tablename__ = "coaches"
 
@@ -247,6 +254,7 @@ class FantasyTeam(Base):
     league_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("leagues.id"), nullable=False)
     season_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("seasons.id"), nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     credit_balance: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False, default=100)
     total_points: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False, default=0)
     wildcard_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -278,7 +286,7 @@ class Lineup(Base):
     entity_type: Mapped[EntityType] = mapped_column(Enum(EntityType, name="entity_type"), nullable=False)
     entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     slot: Mapped[Slot] = mapped_column(Enum(Slot, name="slot"), nullable=False)
-    slot_role: Mapped[SlotRole] = mapped_column(Enum(SlotRole, name="slot_role"), nullable=False)
+    slot_role: Mapped[SlotRole | None] = mapped_column(Enum(SlotRole, name="slot_role"), nullable=True)
     is_captain: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 

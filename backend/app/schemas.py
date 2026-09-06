@@ -8,7 +8,46 @@ matches, matchdays. See docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 7.
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from typing import Literal
+
+
+class UserRegisterIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=72)
+    display_name: str = Field(min_length=1, max_length=60)
+
+    @field_validator("password")
+    @classmethod
+    def password_bytes(cls, value):
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Password must not exceed 72 UTF-8 bytes")
+        return value
+
+
+class UserLoginIn(BaseModel):
+    email: EmailStr
+    password: str = Field(max_length=72)
+
+    @field_validator("password")
+    @classmethod
+    def password_bytes(cls, value):
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Password must not exceed 72 UTF-8 bytes")
+        return value
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+    display_name: str
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
 
 class CompetitionOut(BaseModel):
@@ -60,6 +99,7 @@ class PlayerDetailOut(PlayerOut):
 
 
 class MatchdayOut(BaseModel):
+    deadline: datetime | None = None
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -109,3 +149,96 @@ class TopPerformerOut(BaseModel):
     player_name: str
     real_club: str
     raw_points: float
+
+
+class PlayerCatalogOut(BaseModel):
+    items: list[PlayerOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class PlayerFacetsOut(BaseModel):
+    clubs: list[str]
+    positions: list[str]
+
+
+Formation = Literal["THREE_THREE", "FOUR_TWO", "TWO_FOUR"]
+
+
+class LineupValidationIn(BaseModel):
+    formation: Formation
+    active_player_ids: list[uuid.UUID] = Field(min_length=7, max_length=7)
+    captain_id: uuid.UUID
+    competition_id: uuid.UUID | None = None
+
+
+class LineupValidationOut(BaseModel):
+    valid: Literal[True] = True
+    formation: Formation
+    counts: dict[str, int]
+
+
+class TeamCreateIn(BaseModel):
+    competition_id: uuid.UUID
+    name: str = Field(min_length=1, max_length=40)
+    player_ids: list[uuid.UUID] = Field(min_length=11, max_length=11)
+    coach_id: uuid.UUID
+
+
+class RosterEntryOut(BaseModel):
+    entity_type: str
+    entity_id: uuid.UUID
+    name: str
+    real_club: str
+    purchase_price: float
+    position: str | None
+    current_cost: float
+
+
+class TeamOut(BaseModel):
+    competition_id: uuid.UUID
+    version: int
+    id: uuid.UUID
+    league_id: uuid.UUID
+    season_id: uuid.UUID
+    name: str
+    credit_balance: float
+    total_points: float
+    wildcard_used: bool
+    roster: list[RosterEntryOut]
+
+
+class TransferIn(BaseModel):
+    drop_entity_type: str
+    drop_entity_id: uuid.UUID
+    add_entity_type: str
+    add_entity_id: uuid.UUID
+
+
+
+
+class CoachOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+    real_club: str
+    current_cost: float
+
+
+class SavedLineupIn(BaseModel):
+    formation: Formation
+    active_player_ids: list[uuid.UUID] = Field(min_length=7, max_length=7)
+    captain_id: uuid.UUID
+    expected_version: int = Field(ge=0)
+
+
+class SavedLineupOut(BaseModel):
+    team_id: uuid.UUID
+    matchday_id: uuid.UUID
+    formation: Formation | None
+    active_player_ids: list[uuid.UUID]
+    bench_player_ids: list[uuid.UUID]
+    captain_id: uuid.UUID | None
+    coach_id: uuid.UUID | None
+    version: int
