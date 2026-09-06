@@ -51,5 +51,12 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24 * 7  # 7 days -- no refresh-token flow yet (see docs, Section 7)
 
+    # Used to build email-verification/password-reset links. Matches the
+    # frontend dev server's actual port (see CONTINUE.md) -- override via
+    # .env for any other deployment.
+    frontend_base_url: str = "http://localhost:3000"
+    email_verification_token_ttl_hours: int = 48
+    password_reset_token_ttl_hours: int = 1
+
 
 settings = Settings()

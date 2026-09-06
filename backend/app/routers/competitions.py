@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.cache import get_or_compute_json
+from app.core.cache import get_or_compute_json, make_cache_key
 from app.core.db import get_db
 from app.schemas import CompetitionOut, LeaderboardOut, MatchdayOut, StandingsRow
 from db.models import Competition, FantasyTeam, League, Match, Matchday, MatchStatus, Season, User
@@ -41,7 +41,7 @@ async def get_standings(
     scraper writes new match results, same freshness window as the
     Cache-Control header this route already carries.
     """
-    cache_key = f"standings:v1:{competition_id}:{season_id or 'all'}"
+    cache_key = make_cache_key("standings:v2", competition_id=competition_id, season_id=season_id)
     data = await get_or_compute_json(cache_key, lambda: _compute_standings(competition_id, db, season_id))
     return [StandingsRow(**row) for row in data]
 
@@ -130,7 +130,7 @@ async def get_leaderboard(
 
     Cached (Phase 2 of the performance plan), same pattern as standings.
     """
-    cache_key = f"leaderboard:v1:{competition_id}:{limit}:{offset}"
+    cache_key = make_cache_key("leaderboard:v2", competition_id=competition_id, limit=limit, offset=offset)
     data = await get_or_compute_json(cache_key, lambda: _compute_leaderboard(competition_id, limit, offset, db))
     return LeaderboardOut(**data)
 

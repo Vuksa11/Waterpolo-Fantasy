@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.cache import get_or_compute_json
+from app.core.cache import get_or_compute_json, make_cache_key
 from app.core.db import get_db
 from app.schemas import PlayerCatalogOut, PlayerFacetsOut, PlayerDetailOut, PlayerOut, PlayerSeasonStats, PriceHistoryPoint
 from db.models import EntityType, FantasyScore, Matchday, Player, Position, PriceHistoryEntry
@@ -37,7 +37,20 @@ async def player_catalog(
 ) -> PlayerCatalogOut:
     # Cached (Phase 2 of the performance plan) -- keyed on every filter/sort/
     # page combination, since each is a genuinely different result set.
-    cache_key = f"catalog:v1:{competition_id}:{search}:{position}:{club}:{sort}:{limit}:{offset}"
+    # make_cache_key JSON-encodes+hashes the params (not naive string
+    # interpolation) -- an independent review found the old
+    # f"{search}:{club}" format let different filters collide when a value
+    # itself contained the ":" separator.
+    cache_key = make_cache_key(
+        "catalog:v2",
+        competition_id=competition_id,
+        search=search,
+        position=position,
+        club=club,
+        sort=sort,
+        limit=limit,
+        offset=offset,
+    )
     data = await get_or_compute_json(
         cache_key, lambda: _compute_catalog(competition_id, search, position, club, sort, limit, offset, db)
     )
@@ -83,7 +96,7 @@ async def player_facets(
     competition_id: uuid.UUID | None = None, db: AsyncSession = Depends(get_db)
 ) -> PlayerFacetsOut:
     # Cached (Phase 2 of the performance plan).
-    cache_key = f"facets:v1:{competition_id}"
+    cache_key = make_cache_key("facets:v2", competition_id=competition_id)
     data = await get_or_compute_json(cache_key, lambda: _compute_facets(competition_id, db))
     return PlayerFacetsOut(**data)
 

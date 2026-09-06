@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.cache import get_or_compute_json
+from app.core.cache import get_or_compute_json, make_cache_key
 from app.core.db import get_db
 from app.routers.competitions import get_standings
 from app.schemas import HomeOut, MatchdaySummary, MatchOut
@@ -48,7 +48,7 @@ async def home(
     # 404s (bad competition_id/matchday_id) intentionally aren't cached --
     # only the successful-response path below goes through the cache, so a
     # typo'd ID doesn't need any special-casing here.
-    cache_key = f"home:v1:{competition_id}:{matchday_id or 'latest'}"
+    cache_key = make_cache_key("home:v2", competition_id=competition_id, matchday_id=matchday_id)
     data = await get_or_compute_json(cache_key, lambda: _compute_home(competition_id, matchday_id, db))
     return HomeOut(**data)
 

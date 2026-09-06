@@ -368,14 +368,25 @@ async def create_team(
             db.add(league)
             await db.flush()
 
-        # Note (frontend-session review, still open): this existence check and
-        # the later INSERT aren't atomic with each other -- two truly
-        # simultaneous requests with *different* idempotency keys (or none)
-        # could both pass this check before either commits. The idempotency
-        # claim above closes that hole for retries of the *same* logical
-        # request; a duplicate-team race from two distinct requests would
-        # need a unique constraint on (user_id, league_id) in fantasy_teams
-        # to close fully. Not fixed here -- tracked as a follow-up.
+        # Correction (an independent review, Codex, problemV15, caught this
+        # comment was stale after the frontend-branch merge): this existence
+        # check is NOT actually racy against a truly simultaneous distinct
+        # request the way it used to be documented. The `with_for_update()`
+        # season lock above is held for the rest of this transaction (until
+        # commit/rollback), so a second concurrent create_team call for the
+        # SAME season blocks at that SELECT until the first one finishes --
+        # it then sees the first request's committed team and correctly
+        # 409s here, rather than both passing this check simultaneously.
+        # This is a wider-than-necessary side effect of a lock taken for a
+        # different reason (serializing per season, not per league), and
+        # it's part of why concurrent create_team calls show up as write
+        # contention under load (see docs/FRONTEND_BACKEND_HANDOFF.md,
+        # performance plan) -- if that lock is ever narrowed or replaced
+        # (e.g. a partial unique index on leagues, discussed there), this
+        # existence check's uniqueness guarantee must be preserved some
+        # other way (a unique constraint on (user_id, league_id) in
+        # fantasy_teams, with the resulting IntegrityError handled, is the
+        # natural replacement) -- not silently reopened.
         existing = await db.scalar(
             select(FantasyTeam).where(FantasyTeam.user_id == user_id, FantasyTeam.league_id == league.id)
         )
