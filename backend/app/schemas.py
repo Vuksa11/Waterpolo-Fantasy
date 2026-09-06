@@ -66,6 +66,18 @@ class PlayerOut(BaseModel):
     current_cost: float
 
 
+class PlayerCatalogOut(BaseModel):
+    items: list[PlayerOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class PlayerFacetsOut(BaseModel):
+    clubs: list[str]
+    positions: list[str]
+
+
 class PlayerSeasonStats(BaseModel):
     total_raw_points: float
     matchdays_played: int
