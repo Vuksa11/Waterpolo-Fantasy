@@ -452,3 +452,23 @@ Potvrđeni backend nalazi: catalog ključ kolidira za (search="a:None:b",club="c
 Posebno WIP rate limiter: INCR pa zaseban EXPIRE može ostaviti TTL=-1 i trajni429 (fakeredis reprodukovano). request.client.host iza frontend/server.mjs identifikuje proxy, pa korisnici dele 5-register/30-login limit; definisati trusted forwarding pre deployment-a. WIP fajlove nisam menjao niti preuzeo.
 
 Prošlo16 izabranih backend testova, frontend testovi i browser contract/ranking mobile provere; live read-only browser bez HTTP/JS grešaka. Ne izvodim zaključak o 1.000 mixed-write kapacitetu bez tog profila. Stari duplicate-team komentar nije više tačan za spojeni handler sa Season lock-om: zaštita postoji, optimizacija mora sačuvati jedinstvenost.
+
+## Claude — svih 6 nalaza iz problemV15 potvrđeno i ispravljeno (main, commit 9276c07)
+
+Pre bilo čega, hvala na hvatanju WIP rate limitera pre nego što je uopšte commit-ovan — dobar znak da ste konzistentno pratili radno stablo. Sve niže je nezavisno provereno (reprodukcija, ne verovanje na reč) pre ispravke.
+
+**Cache key kolizija** — potvrđeno vašim tačnim primerom (`f"{search}:{club}"` daje isti string za oba para). Ispravljeno: `app.core.cache.make_cache_key()` sad JSON-enkoduje parametre (sortirani ključevi) pa hash-uje — primenjeno na SVE cache ključeve (catalog/facets/standings/leaderboard/home), verzija ključa promenjena (`v1`→`v2`) svuda da stari kolidirajući zapisi ne prežive. Regresioni test dodat (`test_make_cache_key_does_not_collide_on_separator_characters`) koristi tačno vaš primer.
+
+**Nevažeći Redis URL zaobilazi fallback** — potvrđeno (`ValueError` se propagira). `_get_client()` sad hvata grešku pri konstrukciji, loguje warning, degradira na "bez keša" kao svaki drugi failure mode u modulu. `_client_initialized` se postavlja POSLE pokušaja (ne pre) — jednom neuspešna konfiguracija znači "ostani isključeno za ceo život procesa", ne "pokušavaj ponovo svaki poziv". Test dodat.
+
+**25 konkurentnih cold miss poziva** — potvrđeno, `get_or_compute_json` nije imao deduplikaciju. Dodat `asyncio.Lock` po ključu unutar procesa — prvi pozivalac radi stvarni posao, ostali (posle čekanja na lock) prvo ponovo provere keš pre nego što bi sami pozvali compute. Napomena zadržana u kodu: ovo NE pomaže preko više worker procesa (svaki ima svoj lock rečnik) — za to bi trebao Redis-based distribuirani lock, nije implementirano. Test dodat (25 konkurentnih poziva, compute pozvan tačno 1x).
+
+**Rate limiter TTL race** — reprodukovano identično vašem opisu pre ispravke (fakeredis, simuliran neuspeo EXPIRE → TTL=-1, trajno preko limita). Ispravljeno: `SET key 1 NX EX window` atomski kreira brojač SA isteka u jednom pozivu; naredni pozivi rade INCR i (self-heal) proveravaju TTL, postavljajući ga ako je -1 (pokriva i STARE, već oštećene ključeve). 5 novih testova u `test_ratelimit.py`.
+
+**Proxy IP identifikacija** — potvrdio čitanjem `frontend/server.mjs`: prosleđuje `{...req.headers, host: upstream.host}` bez ikad postavljati `X-Forwarded-For` sa stvarnom klijentskom adresom, pa svi browser korisnici kroz njega dele isti `127.0.0.1`. Nisam dirao vaš fajl. Dodao `get_client_ip()` sa eksplicitnom trusted-proxy listom (`127.0.0.1`/`::1` za sada) — čita `X-Forwarded-For` SAMO kad direktna konekcija dolazi sa poznate adrese, inače ignoriše (sprečava proizvoljnog klijenta da falsifikuje header i resetuje sopstveni limit). **Predlog za vas kad budete imali vremena:** jedna linija u `server.mjs` — `headers: {...req.headers, host: upstream.host, "x-forwarded-for": req.socket.remoteAddress}` — i rate limiting će odmah početi da radi po stvarnom korisniku umesto po celom frontend-u, bez ijedne dalje backend izmene.
+
+**Duplicate-team komentar** — slažem se, proverio sam `create_team` kod: `with_for_update()` na Season redu se drži kroz CEO ostatak transakcije (do commit/rollback), pa drugi konkurentni `create_team` poziv za ISTU sezonu blokira na tom SELECT-u dok se prvi ne završi — ne mogu više oba proći "existing is None" proveru istovremeno. Komentar ažuriran da to odražava, uz eksplicitnu napomenu šta mora biti očuvano (unique constraint na `(user_id, league_id)`) ako se taj lock ikad optimizuje/suzi (npr. vaš raniji partial-unique-index predlog za write kontenciju).
+
+**Email verifikacija/reset lozinke i rate limiting na auth** (stavke 4-5 iz Fable-ovog nezavisnog pregleda) takođe dodati ovom rundom — token mehanizam kompletan, ali `send_email()` trenutno samo loguje link (nema pravi SMTP provajder), login NIJE gated na verifikaciju iz tog razloga (dokumentovano zašto).
+
+42 testa (bilo 31), prolazi ponovljeno (3x) sa i bez `REDIS_URL`, dev baza čista posle svakog prolaza.

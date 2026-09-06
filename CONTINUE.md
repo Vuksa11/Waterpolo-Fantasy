@@ -509,6 +509,54 @@ transfer limit it depended on was removed -- worth reconciling the doc.
 Legal status of scraping totalwaterpolo.com was explicitly excluded from
 this review's scope (the project owner's call, not a technical question).
 
+## Items 4-5 done (rate limiting, email verification/password reset) +
+## 6 real bugs Codex found and fixed, same session (commit 9276c07)
+
+User picked items 4-7 from Fable's list to do next. Built rate limiting
+(app/core/ratelimit.py: per-IP throttle + per-email login lockout,
+directly closing the exact gap Fable demonstrated) and email
+verification/password reset (app/core/email.py logs the link instead of
+sending -- no real SMTP/provider configured; login NOT gated on
+verification for that reason, documented).
+
+While that was still uncommitted work-in-progress, Codex's problemV15
+review caught it on disk and found a real bug: the rate limiter's
+INCR-then-separate-EXPIRE could leave a key with NO ttl if the process
+died between the two -- reproduced independently with fakeredis before
+fixing (TTL stuck at -1, permanently over its limit). Fixed with an
+atomic `SET NX EX` plus a self-heal check for already-damaged keys.
+
+Codex also re-reviewed already-committed code (the Redis/leaderboard
+work from the previous two sections) and found three more real bugs,
+all independently reproduced before fixing:
+- Cache key collision: `f"{search}:{club}"` let DIFFERENT filters
+  produce the SAME key (search="a:None:b",club="c" collided with
+  search="a",club="b:None:c") -- one user's search could get served
+  another's cached results. Fixed with a JSON-encode+hash key builder
+  (`make_cache_key`), applied everywhere, key version bumped.
+- An invalid REDIS_URL raised synchronously OUTSIDE any try/except,
+  propagating out of every cache call instead of degrading to "no
+  cache" like every other failure mode. Fixed.
+- 25 concurrent cache misses for the same key ran the DB query 25
+  times (no in-flight deduplication). Fixed with a per-key
+  `asyncio.Lock` (single-process only, documented).
+
+Also confirmed and fixed: `request.client.host` alone doesn't identify
+the real browser user once `frontend/server.mjs` proxies requests (it
+doesn't set `X-Forwarded-For` today, confirmed by reading it -- every
+user through it currently shares one rate-limit bucket). Added a
+trusted-proxy-only `get_client_ip()` (doesn't trust that header from an
+untrusted source) and proposed a one-line `server.mjs` change to Codex
+in the handoff doc (not implemented there -- their file). And corrected
+a stale comment in `create_team`: the merged handler's Season row lock
+already serializes concurrent calls for the same season, closing the
+race the old comment described as still open (documented what must be
+preserved -- a unique constraint -- if that lock is ever narrowed).
+
+42 tests now (was 31), passes repeatably (3x) with and without
+REDIS_URL, dev DB clean after every run. Full response posted to Codex
+in the handoff doc.
+
 ## Suggested next steps, roughly in order
 
 1. Decide with the user which of Fable's findings to prioritize next --
