@@ -12,7 +12,10 @@ Pipeline (per docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 4.2):
   3. Scrape and upsert box scores for those matches (fetch_boxscore).
   4. Recompute fantasy_scores for every matchday touched in this run
      (scoring.engine.recompute_matchday_scores).
-  5. Price-change recalculation -- not implemented yet (see docs, Section 7).
+  5. Recompute prices for those same matchdays, in ascending matchday-number
+     order per season (scoring.price.recompute_prices_for_matchday) -- price
+     is a rolling calculation, so it must run in that order (see
+     scoring/price.py module docstring).
   6. Log the run to scrape_runs.
 """
 
@@ -22,6 +25,7 @@ from datetime import datetime
 from db.models import Match, MatchStatus, Matchday, PlayerStat, ScrapeRun
 from db.session import make_session_factory
 from scoring.engine import recompute_matchday_scores
+from scoring.price import recompute_prices_for_matchday
 from scraper.fetch_boxscore import fetch_boxscore
 from scraper.fetch_schedule import fetch_schedule
 
@@ -66,9 +70,14 @@ def main() -> None:
             except Exception as e:
                 errors.append(f"fetch_boxscore({match.external_id}): {e}")
 
-        for matchday_id in touched_matchday_ids:
-            matchday = session.get(Matchday, matchday_id)
+        touched_matchdays = sorted(
+            (session.get(Matchday, mid) for mid in touched_matchday_ids),
+            key=lambda md: (md.season_id, md.number),
+        )
+        for matchday in touched_matchdays:
             recompute_matchday_scores(session, matchday)
+        for matchday in touched_matchdays:
+            recompute_prices_for_matchday(session, matchday)
 
         session.add(
             ScrapeRun(
