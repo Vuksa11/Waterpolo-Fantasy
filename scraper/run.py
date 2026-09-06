@@ -5,56 +5,85 @@ at runtime — the pipeline is fully deterministic. See
 docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 4.4.
 
 Pipeline (per docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 4.2):
-  1. Refresh the fixture list for each of the 3 competitions (fetch_schedule).
-  2. Select matches needing a box-score scrape (LIVE/FINISHED, stats missing
-     or stale).
+  1. Refresh the fixture list for each target competition (fetch_schedule).
+  2. Select matches needing a box-score scrape: FINISHED/LIVE with no
+     player_stats yet. (Re-scraping a LIVE match's still-changing box score
+     mid-game isn't handled here -- see docs, Section 7.)
   3. Scrape and upsert box scores for those matches (fetch_boxscore).
-  4-5. Fantasy score / price-change recalculation — not implemented yet (see
-       docs, Section 7, Next Steps — this is scoring-module work, not scraper
-       work).
+  4. Recompute fantasy_scores for every matchday touched in this run
+     (scoring.engine.recompute_matchday_scores).
+  5. Price-change recalculation -- not implemented yet (see docs, Section 7).
   6. Log the run to scrape_runs.
-
-TODO: step 2's match-selection query and the scrape_runs logging (step 6)
-aren't wired up yet. More fundamentally, TARGET_COMPETITIONS below is empty —
-the exact totalwaterpolo.com schedule-page URLs for the 3 real target
-competitions (Regionalna liga, Super liga Srbije, Prva liga Srbije) haven't
-been identified yet. Everything scraped and written to the database so far
-was a generic sample (VRL Prva Liga, Montenegro) used only to verify the
-parsing and DB-write code paths work end to end.
 """
 
 import os
 from datetime import datetime
 
+from db.models import Match, MatchStatus, Matchday, PlayerStat, ScrapeRun
 from db.session import make_session_factory
+from scoring.engine import recompute_matchday_scores
 from scraper.fetch_boxscore import fetch_boxscore
 from scraper.fetch_schedule import fetch_schedule
-from db.models import Match, MatchStatus
 
-# (name, schedule_url) for each target competition. Empty until the real
-# totalwaterpolo.com pages for our 3 leagues are identified.
-TARGET_COMPETITIONS: list[tuple[str, str]] = []
+# (name, schedule_url) for each league this project actually tracks.
+# Super liga Srbije / Prva liga Srbije are not on totalwaterpolo.com -- the
+# two VRL regional leagues are what's covered instead (see project history).
+TARGET_COMPETITIONS: list[tuple[str, str]] = [
+    ("Regionalna liga (VRL Premier Liga 2025/26)", "https://total-waterpolo.com/vrl-premier-liga-2025-26/"),
+    ("VRL Prva Liga 2025/26 (druga regionalna liga)", "https://total-waterpolo.com/vrl-prva-liga-2025-26/"),
+]
 
 
 def main() -> None:
-    started_at = datetime.utcnow()  # noqa: F841
+    started_at = datetime.utcnow()
     database_url = os.environ["DATABASE_URL_SYNC"]
     session_factory = make_session_factory(database_url)
 
-    if not TARGET_COMPETITIONS:
-        raise NotImplementedError(
-            "TARGET_COMPETITIONS is empty — see module docstring. "
-            "fetch_schedule()/fetch_boxscore() are implemented and verified; "
-            "this orchestrator just has nowhere to point them yet."
-        )
+    matches_processed = 0
+    errors: list[str] = []
 
     with session_factory() as session:
         for name, schedule_url in TARGET_COMPETITIONS:
-            fetch_schedule(session, schedule_url, competition_name=name)
+            try:
+                fetch_schedule(session, schedule_url, competition_name=name)
+            except Exception as e:
+                errors.append(f"fetch_schedule({name}): {e}")
 
-        matches_needing_boxscore = session.query(Match).filter(Match.status != MatchStatus.UPCOMING).all()
-        for match in matches_needing_boxscore:
-            fetch_boxscore(session, int(match.external_id))
+        pending = (
+            session.query(Match)
+            .outerjoin(PlayerStat, PlayerStat.match_id == Match.id)
+            .filter(Match.status.in_([MatchStatus.FINISHED, MatchStatus.LIVE]))
+            .filter(PlayerStat.id.is_(None))
+            .all()
+        )
+
+        touched_matchday_ids: set = set()
+        for match in pending:
+            try:
+                fetch_boxscore(session, int(match.external_id))
+                touched_matchday_ids.add(match.matchday_id)
+                matches_processed += 1
+            except Exception as e:
+                errors.append(f"fetch_boxscore({match.external_id}): {e}")
+
+        for matchday_id in touched_matchday_ids:
+            matchday = session.get(Matchday, matchday_id)
+            recompute_matchday_scores(session, matchday)
+
+        session.add(
+            ScrapeRun(
+                started_at=started_at,
+                finished_at=datetime.utcnow(),
+                matches_processed=matches_processed,
+                error_count=len(errors),
+                notes="\n".join(errors) if errors else None,
+            )
+        )
+        session.commit()
+
+    print(f"Processed {matches_processed} matches, {len(errors)} errors.")
+    for e in errors:
+        print(f"  ERROR: {e}")
 
 
 if __name__ == "__main__":
