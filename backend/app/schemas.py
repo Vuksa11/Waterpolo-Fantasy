@@ -125,7 +125,26 @@ class PlayerDetailOut(PlayerOut):
     price_history: list[PriceHistoryPoint]
 
 
-class MatchdayOut(BaseModel):
+class _MatchdayDisplayLabelMixin:
+    """
+    Shared by every schema that exposes a Matchday's `label`/`number`, so the
+    "what should a user see" rule lives in exactly one place. See
+    MatchdaySummary.display_label's docstring below for the full story
+    (problemV13 caught that this was originally added only there, but
+    /api/competitions/{id}/matchdays -- MatchdayOut, not MatchdaySummary --
+    is what the live frontend's matchday dropdown/banner actually reads).
+    """
+
+    label: str
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def display_label(self) -> str:
+        tail = self.label.split()[-1] if self.label else ""
+        return tail if tail.isdigit() else self.label
+
+
+class MatchdayOut(_MatchdayDisplayLabelMixin, BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -210,7 +229,21 @@ class TopPerformerOut(BaseModel):
     raw_points: float
 
 
-class MatchdaySummary(BaseModel):
+class MatchdaySummary(_MatchdayDisplayLabelMixin, BaseModel):
+    """
+    `display_label` (from _MatchdayDisplayLabelMixin above): `number` is a
+    scraper-internal sort key ONLY (see scraper/db_writer.py's
+    _round_number docstring) -- regular rounds get their real round number,
+    but playoff rounds (Semifinal, Final, ...) get large fixed offsets
+    (9000+) purely so they sort after the regular season without colliding
+    with each other. That was never meant to be shown to a user, but nothing
+    in this schema said so before this field existed, and a real check of
+    the live frontend caught it rendering a literal "9300 KOLO" for a Final
+    matchday. `display_label` always returns something presentable: the
+    plain round number as a string for a normal round, or the round's own
+    label ("Final", "Semifinal", ...) for anything else.
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -218,25 +251,6 @@ class MatchdaySummary(BaseModel):
     number: int
     status: str
     deadline: datetime | None
-
-    @computed_field  # type: ignore[misc]
-    @property
-    def display_label(self) -> str:
-        """
-        `number` is a scraper-internal sort key ONLY (see
-        scraper/db_writer.py's _round_number docstring) -- regular rounds get
-        their real round number, but playoff rounds (Semifinal, Final, ...)
-        get large fixed offsets (9000+) purely so they sort after the regular
-        season without colliding with each other. That was never meant to be
-        shown to a user, but nothing in this schema said so before this field
-        existed, and a real check of the live frontend caught it rendering a
-        literal "9300 KOLO" for a Final matchday. This always returns
-        something presentable: the plain round number as a string for a
-        normal round, or the round's own label ("Final", "Semifinal", ...)
-        for anything else.
-        """
-        tail = self.label.split()[-1] if self.label else ""
-        return tail if tail.isdigit() else self.label
 
 
 class HomeOut(BaseModel):
