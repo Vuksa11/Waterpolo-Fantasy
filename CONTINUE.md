@@ -74,7 +74,7 @@ otherwise) and actually run it (Playwright screenshot or similar) rather than
 just reading source, per how the last check-in found a real missing endpoint
 (`/api/coaches`) that a pure code read hadn't caught.
 
-## Current status (as of commit `5f03cac`)
+## Current status (as of commit `054cd73`)
 
 Verified against the real database (352 players, 132 matches, all live-
 scraped, not synthetic):
@@ -110,6 +110,23 @@ scraped, not synthetic):
   retry after a timeout replays the original response instead of risking a
   duplicate). Redis caching and the actual load test (k6/locust) are next,
   by mutual agreement, only once there's something to measure against.
+- **Two rounds of independently-verified findings from Codex's review** (the
+  frontend session periodically reviews main's code and posts findings to
+  the handoff doc as `Problems/problemV*.md` on the shared Desktop -- read
+  those + the doc's tail before assuming "done"): (1) an idempotency
+  implementation that wasn't atomic with the operation it guarded and had a
+  real race under concurrent identical requests -- rewrote as a two-phase
+  claim/fulfill/release pattern, verified with an actual two-thread
+  concurrent test (not just sequential calls); a Cache-Control middleware
+  bug that skipped private-prefix checking for every non-GET method,
+  silently leaving POST /api/auth and POST /api/teams uncached-but-also-
+  unmarked; and a home-bundle endpoint that could mix matchday/standings
+  across seasons. (2) The first real load test (locust, 100 concurrent,
+  backend/loadtest/) caught bcrypt blocking the whole event loop on
+  register/login -- fixed with asyncio.to_thread, aggregate p95 dropped
+  310ms -> 54ms. Every finding was re-verified by reading the exact cited
+  code before fixing, not accepted on trust -- worth continuing that habit,
+  Codex's reviews have had a 100% hit rate on real bugs so far.
 
 ## Blocked on the user
 
