@@ -1,0 +1,127 @@
+# Continue here
+
+Read this first when resuming. Full architecture/design decisions live in
+`docs/Fantasy_Waterpolo_Arhitektura_v2.md` (Section 7 = the authoritative,
+continuously-updated Next Steps list) — this file is just the practical
+"how do I get back to where I was" pointer, not a duplicate of that doc.
+
+## What this project is
+
+Classic-style fantasy waterpolo. No draft. Covers two real competitions
+scraped live from totalwaterpolo.com: **Regionalna liga** (VRL Premier Liga
+2025/26) and **VRL Prva Liga** 2025/26. (Super liga Srbije / Prva liga Srbije
+were the original target but aren't on the site — scope changed to these two
+VRL leagues instead, per the project owner.)
+
+GitHub: `Vuksa11/Waterpolo-Fantasy`, branch `main`. All work so far is
+committed and pushed — `git log` is the real changelog, more trustworthy than
+prose summaries for what actually happened and when.
+
+## Environment (local dev, not Docker)
+
+This machine runs Postgres natively (installed via apt, not the
+docker-compose.yml in this repo, which is unused for now):
+
+- Postgres 16, systemd service, already running as `postgresql.service`.
+- DB: `waterpolo_fantasy`, user `waterpolo` / password `waterpolo`.
+- Python venv at `.venv/` in this repo root — already has everything in
+  `requirements.txt` installed, plus Playwright's Chromium browser
+  (`playwright install chromium` — no `--with-deps` needed, works fine
+  without extra system libs on this machine).
+- `.env` at repo root has `DATABASE_URL` (asyncpg, for the backend) and
+  `DATABASE_URL_SYNC` (psycopg2, for the scraper/alembic).
+
+**Running the API locally** needs both the repo root and `backend/` on
+`PYTHONPATH` (`db/` and `scoring/` are top-level packages the backend imports,
+but `app/` lives under `backend/`):
+
+```
+PYTHONPATH=$(pwd):$(pwd)/backend DATABASE_URL=postgresql+asyncpg://waterpolo:waterpolo@localhost:5432/waterpolo_fantasy \
+  .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --app-dir backend
+```
+
+(Port 8001, not 8000 — see Codex section below for why.)
+
+**Running the scraper pipeline** (idempotent — safe to re-run, only touches
+matches that don't have player_stats yet):
+
+```
+DATABASE_URL_SYNC=postgresql+psycopg2://waterpolo:waterpolo@localhost:5432/waterpolo_fantasy \
+  .venv/bin/python -m scraper.run
+```
+
+**Migrations**: `cd backend && ../.venv/bin/python -m alembic upgrade head`.
+Current head: `f2806bcaae2f` (4 migrations total, see
+`backend/alembic/versions/`).
+
+## Another AI (Codex) is building the frontend — read this before touching backend/app
+
+The user set up a second AI session (Codex) building the frontend in a
+**separate git worktree**: `/home/vuksa/Pictures/Desktop/FantasyWP-frontend`,
+branch `frontend`, its own isolated Postgres on port 55432. Coordination
+happens through **`docs/FRONTEND_BACKEND_HANDOFF.md`** — read it in full
+before making backend API changes; it has the live contract (endpoint
+shapes, who owns what, open questions each side asked the other) and is more
+current than anything in this file. Append to it (don't just read) when you
+change something Codex's frontend depends on.
+
+Codex's frontend dev server runs on `:3000` with `API_TARGET=http://127.0.0.1:8001`
+— that's why the backend needs to run on **8001**, not the default 8000, when
+checking on their work. Their dev server may already be running (check
+`ss -ltnp | grep 3000` before starting your own — don't kill their process).
+Check in on `FantasyWP-frontend` periodically (read-only unless asked
+otherwise) and actually run it (Playwright screenshot or similar) rather than
+just reading source, per how the last check-in found a real missing endpoint
+(`/api/coaches`) that a pure code read hadn't caught.
+
+## Current status (as of commit `cdad065`)
+
+Verified against the real database (352 players, 132 matches, all live-
+scraped, not synthetic):
+
+- **Scraper**: fully working (`scraper/`) — schedule + box-score parsing via
+  headless Playwright rendering (the site's data loads client-side against a
+  token-gated API; rendering the real page sidesteps that legitimately).
+- **Scoring** (`scoring/engine.py`) and **price changes** (`scoring/price.py`):
+  implemented and verified against the full dataset.
+- **API** (`backend/app/routers/`): read-only sports data (competitions,
+  standings, players incl. catalog/facets, matches, matchdays) + auth
+  (email/password, JWT) + fantasy team creation/transfers (budget-checked,
+  transactional). All live-tested, including via Codex's own test suite,
+  which caught and got fixed: a password-hashing crash over 72 bytes, a SQL
+  LIKE-escaping bug in player search, and missing limit/offset/sort
+  validation.
+- **NOT built yet**: lineup management (formation, bench, captain,
+  per-matchday scoring for a team) — blocked on `players.position`, see
+  below. Codex has already designed and tested (against synthetic data) the
+  API shape for this — `PUT /api/teams/{id}/lineup`, optimistic concurrency
+  via a `version` field, deadline-based locking — worth adopting rather than
+  re-designing when this gets built.
+
+## Blocked on the user
+
+- **`players.position`** (OT/CF/CB) — null for every player. Not scrapeable
+  (confirmed absent from the match box-score page). The user said they'll
+  send a reference file. This blocks: lineup/formation validation, and the
+  frontend's team-builder (which correctly disables buying any player until
+  this exists).
+- **Real coach names** — every club currently has one generic placeholder
+  `Coach` row (name suffixed "— trener TBD"). Same file as positions, per the
+  user.
+- **Goalkeeper stable IDs** — field players get a stable external id
+  straight from the box score; goalkeepers don't (confirmed, not a bug).
+  Needs a team-squad page sample to resolve properly; currently matched by
+  (name, club) instead. Not blocking anything today, just less robust.
+
+## Suggested next steps, roughly in order
+
+1. When the position/coach file arrives: backfill `players.position` and
+   real `Coach` names, then build lineup management (adopt Codex's tested
+   API shape rather than designing fresh).
+2. Check in on `FantasyWP-frontend` and merge when both sides are ready
+   (watch for the alembic branching noted in the handoff doc — two
+   migrations may share a `down_revision` and need reconciling).
+3. Goalkeeper ID resolution via a team-squad page sample, if/when convenient.
+4. Everything else is tracked in `docs/Fantasy_Waterpolo_Arhitektura_v2.md`,
+   Section 7 — that list is kept current; trust it over memory of what "next
+   steps" were at any earlier point in this file.
