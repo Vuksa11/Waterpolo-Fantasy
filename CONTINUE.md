@@ -51,8 +51,9 @@ DATABASE_URL_SYNC=postgresql+psycopg2://waterpolo:waterpolo@localhost:5432/water
 ```
 
 **Migrations**: `cd backend && ../.venv/bin/python -m alembic upgrade head`.
-Current head: `d86291b3557f` (6 migrations total, see
-`backend/alembic/versions/`).
+Current head: `11873788c5dc` (9 migrations total, see
+`backend/alembic/versions/` -- includes the merge revision joining the
+`main`/`frontend` branch alembic chains, see the merge section below).
 
 **Running tests**: `.venv/bin/python -m pytest` from the repo root (no manual
 `PYTHONPATH`/`DATABASE_URL` needed -- `pytest.ini` sets `pythonpath`, and
@@ -203,34 +204,67 @@ merge itself (see below). Idempotency crash-recovery (background sweep/lease)
 was never part of the original Phase-1 list; it's a separate open item from
 the V9-V12 review rounds, still unresolved.
 
-## Merge with the `frontend` branch is now the live topic (as of 2026-09-06)
+## Merge with the `frontend` branch is DONE (2026-09-06, commit `5a823d5`)
 
-The user asked to get this moving. Real state, confirmed by reading
-`frontend`'s current teams.py/lineups.py (read-only): that branch merged
-`main` at commit `85c5109` -- **18 of my commits behind** (before the whole
-performance plan, before `/api/home`, before the idempotency-key mechanism,
-before every problemV8-V13 fix, before ETag, before the test suite). Codex
-independently built `version`/deadline/ownership/lineup management on top of
-that old `teams.py` in the meantime, while I independently built idempotency
-claim/fulfill/release on mine -- same file, two substantial independent
-expansions. A real git merge would conflict on `teams.py`, `schemas.py`, and
-the alembic chain, not just the migration `down_revision`.
+The user asked to get this moving, then said not to wait hours for Codex's
+reply and to go ahead. Real starting state: `frontend` had merged `main` at
+commit `85c5109` -- 18 of my commits behind (before the whole performance
+plan, `/api/home`, the idempotency-key mechanism, every problemV8-V13 fix,
+ETag, the test suite). Codex independently built `version`/deadline/
+ownership/lineup management on that old `teams.py` in the meantime, while I
+independently built idempotency claim/fulfill/release on mine.
 
-Proposed in the handoff doc (posted, awaiting Codex's reply before touching
-anything): I take the backend side of the merge -- pull `frontend`'s
-teams.py/lineups.py/schemas.py/migrations as the write-model base (richer,
-covers lineup management I haven't built), layer my idempotency mechanism on
-top, carry over the performance work (indexes/gzip/Cache-Control/ETag/
-`/api/home`) and the test suite untouched. For alembic: write a merge
-revision joining `c83207f2a491`->`d93418e3b502` (Codex's chain) with
-`e2f53c959c38`->`d86291b3557f` (mine) -- both branches share `f2806bcaae2f`
-as their last common point. Asked Codex to confirm `bad666f` is a stable
-base for this (no in-flight WIP) and to flag anything non-obvious about their
-version/deadline optimistic-concurrency semantics before I start.
+Did the merge on a throwaway branch (`merge-frontend-attempt`) first,
+verified everything, THEN fast-forwarded `main` onto it -- nothing went
+straight to `main` unverified. Key decisions:
 
-Also noticed (user flagged it) that the `frontend` worktree had an unpushed
-local commit (`bad666f`) -- pushed it to `origin/frontend`, didn't touch its
-untracked `NASTAVAK.md` (Codex's own continuity file, left alone).
+- `teams.py`/`schemas.py`: frontend's write-model is the base (Decimal
+  `money()`, `check_window`/`current_window` deadline gating, `owned_team`,
+  batched `team_outputs`, `save_lineup`/`get_lineup`, the richer
+  `TeamOut`/`RosterEntryOut`/`TeamCreateIn`). My idempotency claim/fulfill/
+  release wraps `create_team` and `transfer`, unchanged otherwise.
+  `MatchdayOut` keeps both frontend's `deadline` field and my
+  `_MatchdayDisplayLabelMixin`.
+- **Self-caught mistake, fixed before it shipped**: first pass deliberately
+  dropped `current_window` from `transfer()`, reasoning it would 409 every
+  transfer against today's historical/no-deadline data. Running frontend's
+  own `test_teams.py::test_closed_windows_and_unknown_positions` caught this
+  as a real failure -- correctly: a real fantasy transfer must never skip
+  deadline gating just because current data has no upcoming gameweek.
+  Reverted to match frontend's tested behavior exactly.
+- Alembic: real merge revision `11873788c5dc` joins frontend's
+  `c83207f2a491`->`d93418e3b502` chain with mine
+  (`e2f53c959c38`->`d86291b3557f`) at their shared parent `f2806bcaae2f`.
+  Applied to the dev DB -- `fantasy_teams.version` and `lineups` now coexist
+  with `idempotency_keys` and every index from both sides.
+- Git's silent (no-conflict-marker) auto-merges were NOT trusted blindly --
+  diffed `players.py`/`db/models.py`/`core/config.py`/`matchdays.py` against
+  both original branches by hand. One looked like a regression at first
+  (players.py's SQL-escape/422-validation) but turned out to be a restyle
+  with identical protection (inline escape, `Literal`/enum FastAPI types
+  instead of manual checks) -- confirmed before concluding either way.
+
+Verified: full suite (16 tests -- 10 frontend's + 6 mine) passes repeatably
+(3x in a row), dev DB clean each time. Also exercised the live server
+end-to-end outside pytest (register -> create team -> transfer 409s with no
+upcoming matchday -> 200 once a test-only UPCOMING+future-deadline matchday
+exists -> save_lineup 422s cleanly on unverified positions) and the live
+frontend on :3000 against this backend (no console errors, no 4xx/5xx,
+banner correctly shows "Finale" via Codex's own independent fix).
+
+Pushed to `origin/main` (`5a823d5`). Posted a full writeup in the handoff
+doc. Codex's `frontend` branch is untouched -- when they're ready to
+rebase/merge it onto the new `main`, most of the hard conflicts are already
+resolved here, so it should be much thinner. Also separately pushed an
+unpushed local commit (`bad666f`) from the `frontend` worktree that the user
+noticed Codex hadn't pushed.
+
+Known follow-ups NOT resolved by this merge (unchanged from before):
+idempotency crash/cancellation-during-claim recovery (background sweep/lease
+needed), `(user_id, league_id)` uniqueness for create_team's distinct-request
+race, auth email uniqueness race, per-competition `scrape_runs` freshness,
+real position/deadline data (blocked on the project owner), and the actual
+1000-concurrent load test (Phase 3, not started).
 
 ## Blocked on the user
 
