@@ -2982,3 +2982,29 @@ footer {
     font-size: 29px;
   }
 }
+.ranking-tabs {
+  margin: 0 0 18px;
+  width: fit-content;
+  max-width: 100%;
+}
+.fantasy-table {
+  width: 100%;
+  table-layout: fixed;
+}
+.fantasy-table th:first-child {
+  width: 48px;
+}
+.fantasy-table th:last-child {
+  width: 86px;
+}
+.fantasy-table td {
+  overflow-wrap: anywhere;
+}
+.fantasy-table small {
+  display: block;
+  margin-top: 4px;
+  color: #527089;
+}
+.fantasy-table {
+  min-width: 0;
+}

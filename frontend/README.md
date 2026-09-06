@@ -59,10 +59,11 @@ jedan poziv. Ključ se odvaja po tokenu, putanji i telu preko SHA-256; token se 
 čuva u identifikatoru ključa. Posle neizvesnog PUT sastava front čita server i
 proverava da li je traženi sastav već sačuvan, bez slepog ponavljanja upisa.
 
-Serverska podrška je obavezna za garanciju idempotentnosti. Backend ove frontend
-grane još nije dobio Claudeovu idempotency implementaciju. Njegov main, zasebno,
-još čeka usklađivanje proširenog team/lineup ugovora i oporavak pending zahteva.
-Slanje header-a samo po sebi ne rešava te backend zavisnosti.
+Serverska podrška za Idempotency-Key, /home i prošireni teams/lineup ugovor
+sada je spojena iz main-a. Oporavak pending ključa posle pada procesa i dalje
+je otvoren backend problem. Tabela ima odvojene tabove klubova i fantasy timova;
+fantasy bodovanje još nije kompletirano, što je označeno u prikazu. Novi auth
+rate limiter iz Claudeovog radnog stabla nije uključen dok se ne završi pregled.
 
 Browser test sa izolovanim API odgovorima (bez upisa u bazu):
 

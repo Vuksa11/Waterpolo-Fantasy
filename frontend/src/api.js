@@ -27,7 +27,31 @@ async function fetchRequest(
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
     const data = await response.json().catch(() => null);
+    if (response.ok && data === null) {
+      throw new ApiError(
+        "Server je vratio neispravan odgovor. Ishod nije potvrđen.",
+        502,
+      );
+    }
     if (!response.ok) {
+      if (response.status === 429) {
+        const seconds = Number(response.headers.get("Retry-After"));
+        const retryAt = Date.parse(response.headers.get("Retry-After") || "");
+        const wait =
+          seconds > 0
+            ? seconds
+            : Number.isFinite(retryAt)
+              ? Math.max(0, (retryAt - Date.now()) / 1000)
+              : 0;
+        const error = new ApiError(
+          wait > 0
+            ? `Previše pokušaja. Pokušaj ponovo za oko ${Math.ceil(wait / 60)} min.`
+            : "Previše pokušaja. Sačekaj pre ponovnog slanja.",
+          429,
+        );
+        error.retryAfter = wait;
+        throw error;
+      }
       let detail = data?.detail;
       throw new ApiError(
         Array.isArray(detail)

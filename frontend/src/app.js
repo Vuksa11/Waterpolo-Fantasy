@@ -114,6 +114,8 @@ function setPage(value) {
   page = value in names ? value : "home";
   location.hash = page;
   render();
+  if (page === "standings" && rankingView === "fantasy" && mode === "api")
+    loadRanking();
   if (page === "players") loadCatalog();
   window.scrollTo({ top: 0, behavior: "instant" });
 }
@@ -123,6 +125,8 @@ addEventListener("hashchange", () => {
     page = next;
     render();
     if (page === "players") loadCatalog();
+    if (page === "standings" && rankingView === "fantasy" && mode === "api")
+      loadRanking();
   }
 });
 const budget = () =>
@@ -261,8 +265,63 @@ function catalogContent() {
 function fixturesPage() {
   return `<div class="page-title section-banner"><div><div class="eyebrow">${esc(currentCompetition()?.name)}</div><h1>Raspored</h1><p>Vreme početka prikazano za Beograd.</p></div><select id="matchday" aria-label="Izaberi kolo">${matchdays.map((d) => `<option value="${d.id}" ${selectedDay === d.id ? "selected" : ""}>${esc(d.label)}</option>`).join("")}</select></div><section class="card"><div class="card-head tinted"><h3>${esc(currentDay()?.label || "Utakmice")}</h3><span class="pill">${matches.length} utakmica</span></div>${fixtureRows()}</section>`;
 }
+let rankingView = "clubs";
+let ranking = { entries: [], total: 0, offset: 0, limit: 25 };
+let rankingState = "idle";
+let rankingVersion = 0;
+let rankingController;
+function rankingTabs() {
+  return `<div class="ranking-tabs view-switch" role="group" aria-label="Vrsta tabele"><button data-ranking="clubs" aria-pressed="${rankingView === "clubs"}">Klubovi</button><button data-ranking="fantasy" aria-pressed="${rankingView === "fantasy"}">Fantasy timovi</button></div>`;
+}
+async function loadRanking(offset = 0) {
+  const version = ++rankingVersion;
+  rankingController?.abort();
+  rankingController = new AbortController();
+  rankingState = "loading";
+  if (page === "standings") render();
+  try {
+    const result = await request(
+      `/competitions/${competition}/leaderboard?limit=25&offset=${offset}`,
+      { signal: rankingController.signal, cacheMs: 30000 },
+    );
+    if (version !== rankingVersion) return;
+    ranking = result;
+    rankingState = "ready";
+  } catch (e) {
+    if (version !== rankingVersion || e.name === "AbortError") return;
+    rankingState =
+      e.status === 404
+        ? "Rang-lista još nije dostupna za ovo takmičenje."
+        : e.message;
+  }
+  if (page === "standings") render();
+}
+function fantasyRanking() {
+  const head = `<div class="page-title section-banner"><div><div class="eyebrow">${esc(currentCompetition()?.name)}</div><h1>Fantasy tabela</h1><p>Timovi i menadžeri regionalne lige.</p></div></div>${rankingTabs()}`;
+  if (mode === "demo")
+    return (
+      head +
+      '<section class="card"><div class="empty">Fantasy rang-lista dostupna je u API režimu.</div></section>'
+    );
+  const notice =
+    '<div class="notice">Obračun bodova fantasy timova još je u pripremi. Prikazani bodovi su trenutno upisane vrednosti, a ne konačan plasman.</div>';
+  if (rankingState === "loading" || rankingState === "idle")
+    return head + notice + loadingCards("Učitavam fantasy tabelu…");
+  if (rankingState !== "ready")
+    return (
+      head +
+      notice +
+      `<div class="error-box" role="alert">${esc(rankingState)} <button class="secondary" id="retry-ranking">Pokušaj ponovo</button></div>`
+    );
+  return (
+    head +
+    notice +
+    `<section class="card"><div class="table-scroll"><table class="standings-table fantasy-table"><thead><tr><th>#</th><th>Tim / menadžer</th><th>Bodovi</th></tr></thead><tbody>${ranking.entries.map((r) => `<tr><td>${r.rank}</td><td><b>${esc(r.team_name)}</b><small>${esc(r.owner_display_name)}</small></td><td>${money(r.total_points)}</td></tr>`).join("")}</tbody></table>${ranking.entries.length ? "" : '<div class="empty">Još nema fantasy timova u ovoj ligi.</div>'}</div><div class="pagination"><span>${ranking.total ? ranking.offset + 1 : 0}–${Math.min(ranking.offset + ranking.entries.length, ranking.total)} od ${ranking.total} timova</span><div><button class="secondary" id="ranking-prev" ${ranking.offset === 0 ? "disabled" : ""}>← Prethodna</button><button class="secondary" id="ranking-next" ${ranking.offset + ranking.limit >= ranking.total ? "disabled" : ""}>Sledeća →</button></div></div></section>`
+  );
+}
 function standingsPage() {
-  return `<div class="page-title section-banner"><div><div class="eyebrow">${esc(currentCompetition()?.name)}</div><h1>Tabela</h1><p>Plasman klubova na osnovu odigranih utakmica.</p></div><span class="pill">${mode === "demo" ? "Ilustrativni rezultati" : "Sportski API"}</span></div><section class="card table-scroll"><table class="standings-table"><thead><tr><th>#</th><th>Klub</th><th>OD</th><th>P</th><th>I</th><th>Gol</th><th>Bod.</th></tr></thead><tbody>${tableRows()}</tbody></table>${standings.length ? "" : '<div class="empty">Nema odigranih utakmica u bazi.</div>'}</section><div class="notice">Tabela prikazuje podatke koje vraća backend. Obračun posebnih rezultata posle peteraca i sezonски filter još čekaju backend podršku.</div>`;
+  if (rankingView === "fantasy") return fantasyRanking();
+  return `<div class="page-title section-banner"><div><div class="eyebrow">${esc(currentCompetition()?.name)}</div><h1>Tabela</h1><p>Plasman klubova na osnovu odigranih utakmica.</p></div><span class="pill">${mode === "demo" ? "Ilustrativni rezultati" : "Sportski API"}</span></div>${rankingTabs()}<section class="card table-scroll"><table class="standings-table"><thead><tr><th>#</th><th>Klub</th><th>OD</th><th>P</th><th>I</th><th>Gol</th><th>Bod.</th></tr></thead><tbody>${tableRows()}</tbody></table>${standings.length ? "" : '<div class="empty">Nema odigranih utakmica u bazi.</div>'}</section><div class="notice">Tabela prikazuje podatke koje vraća backend. Obračun posebnih rezultata posle peteraca i sezonски filter još čekaju backend podršku.</div>`;
 }
 const articles = [
   {
@@ -336,6 +395,11 @@ async function bootstrap() {
   controller?.abort();
   catalogController?.abort();
   ++catalogVersion;
+  ++rankingVersion;
+  rankingController?.abort();
+  rankingState = "idle";
+  rankingView = "clubs";
+  ranking = { entries: [], total: 0, offset: 0, limit: 25 };
   dataStates = {};
   homeTop = null;
   teamLoading = false;
@@ -956,6 +1020,23 @@ function bindCatalog() {
   $("#retry-catalog")?.addEventListener("click", loadCatalog);
 }
 function bind() {
+  $$("[data-ranking]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        rankingView = b.dataset.ranking;
+        render();
+        if (rankingView === "fantasy" && mode === "api") loadRanking();
+      }),
+  );
+  $("#ranking-prev")?.addEventListener("click", () =>
+    loadRanking(Math.max(0, ranking.offset - ranking.limit)),
+  );
+  $("#ranking-next")?.addEventListener("click", () =>
+    loadRanking(ranking.offset + ranking.limit),
+  );
+  $("#retry-ranking")?.addEventListener("click", () =>
+    loadRanking(ranking.offset),
+  );
   $$("[data-view]").forEach(
     (b) =>
       (b.onclick = () => {

@@ -4,7 +4,7 @@ Set CHROMIUM_PATH when using an existing Chromium binary.
 """
 import json, os, subprocess
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from playwright.sync_api import sync_playwright
 root = Path(__file__).resolve().parents[1]
 fixture_script = "import {demoDraft,demoPlayers,demoMatches,demoStandings} from './frontend/src/demo.js'; process.stdout.write(JSON.stringify({demoDraft,demoPlayers,demoMatches,demoStandings}));"
@@ -26,6 +26,9 @@ with sync_playwright() as p:
   elif path=='/api/competitions':payload=[{'id':'league','name':'Test liga'}]
   elif path=='/api/home':payload={'selected_matchday':day,'matches':f['demoMatches'],'standings_top4':f['demoStandings'][:4],'updated_at':None}
   elif path.endswith('/matchdays'):payload=[day]
+  elif path.endswith('/leaderboard'):
+   offset=int(parse_qs(urlparse(req.url).query).get('offset',['0'])[0])
+   payload={'competition_id':'league','league_id':'global','total':27,'limit':25,'offset':offset,'entries':[{'rank':i+1,'team_id':str(i),'team_name':'<b>Tim</b> '+str(i+1),'owner_display_name':'Menadžer sa veoma dugim imenom za mobilni prikaz','total_points':0} for i in range(offset,min(offset+25,27))]}
   elif path.endswith('/standings'):payload=f['demoStandings']
   elif path.endswith('/facets'):payload={'clubs':[],'positions':['GK','OT','CF','CB']}
   elif path=='/api/coaches':payload=[{'id':'coach','name':'Test trener','real_club':'Test','current_cost':7}]
@@ -69,6 +72,19 @@ with sync_playwright() as p:
  page.locator('nav [data-go="home"]').click();page.locator('nav [data-go="players"]').click();page.wait_for_timeout(100)
  assert state['requests'].count('/api/players/catalog')==count
  assert '/api/home' in state['requests'];assert not errors,errors
- page.screenshot(path='/tmp/vrl-new-api-mobile.png',full_page=True)
- print('PASS mocked API contract: registration, team create, lineup save/reload, Final label, uncertain transfer retry same key, catalog cache, no JS errors')
+ page.locator('nav [data-go="standings"]').click();page.locator('[data-ranking="fantasy"]').click();page.wait_for_timeout(200)
+ assert page.locator('.fantasy-table tbody tr').count()==25
+ assert page.locator('.fantasy-table tbody tr').first.inner_text().find('<b>Tim</b>')>=0
+ assert 'u pripremi' in page.locator('.notice').inner_text()
+ page.locator('#ranking-next').click();page.wait_for_timeout(200)
+ assert page.locator('.fantasy-table tbody tr').count()==2
+ assert page.locator('#ranking-next').is_disabled()
+ page.locator('#ranking-prev').click();page.wait_for_timeout(100)
+ for width in [320,390,768,1440]:
+  page.set_viewport_size({'width':width,'height':844})
+  assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'),width
+  assert page.locator('.fantasy-table').evaluate('(el)=>el.getBoundingClientRect().right <= innerWidth'),width
+ page.set_viewport_size({'width':390,'height':844})
+ page.screenshot(path='/tmp/vrl-fantasy-ranking-mobile.png',full_page=True)
+ print('PASS ranking pagination/mobile/escaped names and mocked API contract: registration, team create, lineup save/reload, Final label, uncertain transfer retry same key, catalog cache, no JS errors')
  b.close()

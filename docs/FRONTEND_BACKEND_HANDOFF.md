@@ -441,3 +441,14 @@ Korisnik je instalirao `redis-server` (sada aktivan sistemski servis) i rekao da
 **Pun write profil (transfer/lineup/registracija), 300 konkurentnih, 1 worker + Redis**: takođe znatno bolje nego bez Redis-a — agregatni p95 250ms→**43ms**, p99 920ms→**270ms**. `POST /api/teams` i dalje pokazuje višu varijabilnost (p98 890ms) — to je i dalje `create_team`-ova Season row-lock kontencija koju Redis ne rešava direktno (ne kešira se write putanja), samo posredno pomaže oslobađanjem DB pool kapaciteta.
 
 **Zaključak (konačan za ovu rundu):** cilj ~1000 konkurentnih uz "instant" osećaj je postignut za read-heavy saobraćaj (najveći deo stvarnog saobraćaja) — Redis + 1 worker daje p95=55ms/p99=110ms na 1000 konkurentnih čitanja. `create_team` write-lock kontencija ostaje jedina otvorena stavka za razmatranje (opisana ranije, partial unique index predlog). Sirovi CSV-ovi (1000-konkurentni sa/bez Redis-a, 1 i 4 workera; 300-konkurentni write profil sa Redis-om) u `backend/loadtest/results/`. Server ostaje na `REDIS_URL` podešenom, 1 worker (`.env` ažuriran trajno).
+
+
+## Codex — pregled do 9bd8d15 i frontend usklađivanje, 2026-09-07
+
+Detalji `/home/vuksa/Pictures/Desktop/Problems/problemV15.md`. Frontend fast-forward na završeni main; dodat tab Fantasy timovi za /leaderboard, mobile/pagination/empty/error i napomena o nedovršenom team scoring-u. Ispravljen gubitak retry ključa pri neispravnom 2xx JSON odgovoru; dodata 429/Retry-After poruka.
+
+Potvrđeni backend nalazi: catalog ključ kolidira za (search="a:None:b",club="c") i (search="a",club="b:None:c") uz position=None; invalid Redis URL prolazi van fallback try-a; 25 konkurentnih cold miss poziva računaju isti ključ 25 puta. CSV 1.000 read-only: 40.083 GET, p95=56ms,p99=110ms,0 grešaka — dobar rezultat, ne potvrda validnih lineup upisa (loadtest prihvata sve422; 300-user write profil). Scoring i crash recovery ostaju otvoreni.
+
+Posebno WIP rate limiter: INCR pa zaseban EXPIRE može ostaviti TTL=-1 i trajni429 (fakeredis reprodukovano). request.client.host iza frontend/server.mjs identifikuje proxy, pa korisnici dele 5-register/30-login limit; definisati trusted forwarding pre deployment-a. WIP fajlove nisam menjao niti preuzeo.
+
+Prošlo16 izabranih backend testova, frontend testovi i browser contract/ranking mobile provere; live read-only browser bez HTTP/JS grešaka. Ne izvodim zaključak o 1.000 mixed-write kapacitetu bez tog profila. Stari duplicate-team komentar nije više tačan za spojeni handler sa Season lock-om: zaštita postoji, optimizacija mora sačuvati jedinstvenost.

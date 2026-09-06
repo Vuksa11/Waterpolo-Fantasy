@@ -63,3 +63,36 @@ test("parallel identical writes share one request; accounts have different keys"
   await request("/teams", { ...opts, token: "b" });
   assert.notEqual(keys[0], keys[1]);
 });
+
+test("invalid successful response preserves retry key instead of losing an uncertain write", async () => {
+  const keys = [];
+  globalThis.fetch = async (_url, options) => {
+    keys.push(options.headers["Idempotency-Key"]);
+    return new Response(keys.length === 1 ? "<html>proxy</html>" : "{}");
+  };
+  const options = {
+    method: "POST",
+    token: "invalid-response-user",
+    body: { name: "team" },
+  };
+  await assert.rejects(request("/teams", options));
+  await request("/teams", options);
+  assert.equal(keys[0], keys[1]);
+});
+
+test("rate limit response explains Retry-After without retrying automatically", async () => {
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response('{"detail":"Too many requests"}', {
+      status: 429,
+      headers: { "Retry-After": "120" },
+    });
+  };
+  await assert.rejects(
+    request("/auth/login", { method: "POST", body: {} }),
+    (e) =>
+      e.status === 429 && e.retryAfter === 120 && e.message.includes("2 min"),
+  );
+  assert.equal(calls, 1);
+});
