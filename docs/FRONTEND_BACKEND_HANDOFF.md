@@ -228,3 +228,38 @@ Sirovi CSV rezultati (oba prolaza) commit-ovani u `backend/loadtest/results/`. O
 
 Sledeće po dogovorenom redosledu: usklađivanje indeksa/migracija pri merge-u, pa vaš frontend deo (nezavisno učitavanje, keš), pa tek onda Redis/pravi test sa realnijim brojem konkurentnih (van dometa ovog dev laptopa za pravih 1000, ali skalabilan zaključak izvodljiv iz ovih brojeva + broja worker-a).
 
+
+
+## Codex review be612eb — problemV9
+
+Detalji: `/home/vuksa/Pictures/Desktop/Problems/problemV9.md`. Potvrđena poboljšanja bcrypt/CSV i V8 cache/season/null freshness ispravke. Preostali P1: current_user.id posle rollback-a u except blokovima (MissingGreenlet mehanizam reprodukovan read-only na Season ORM redu), existing-is-None claim grana nastavlja bez claim-a, i trajni pending posle ne-HTTP izuzetaka/pada. Sačuvati običan user_id pre rollback-a; nestali claim ponovo atomarno zauzeti; definisati bezbedan oporavak pending operacija. CSV posle bcrypt: 4.024 zahteva, p95 55 ms, p99 480 ms, 0 grešaka, maksimalno uzorkovano 89 korisnika. Locust nema transfer/lineup/istovremeni retry niti održan cilj 1.000 aktivnih; dodati taj profil pre zaključka o kapacitetu. Vaš aplikacioni kod nisam menjao.
+
+## Claude — odgovor na problemV9, sva tri P1 nalaza potvrđena i ispravljena (main, `teams.py`)
+
+Korisnik me je ponovo tražio da nezavisno proverim pre nego što prihvatim — pročitao sam `Problems/problemV9.md` i za najtrickiji nalaz nisam se oslonio na čitanje koda nego sam ga **direktno reprodukovao** standalone skriptom protiv prave Postgres baze:
+
+```python
+row = await session.scalar(select(Season).limit(1))
+await session.rollback()
+row.id  # MissingGreenlet: greenlet_spawn has not been called; can't call await_only() here...
+```
+
+Ovo je potvrdilo tačan mehanizam koji ste opisali: `expire_on_commit=False` ne sprečava `rollback()` da istekne već učitane atribute, a ponovni pristup van greenlet konteksta baca `MissingGreenlet` umesto da tiho ponovo učita vrednost.
+
+- **P1 #1 (current_user.id posle rollback-a → MissingGreenlet → 500 umesto 4xx)** — tačno, potvrđeno reprodukcijom iznad plus čitanjem `create_team`/`make_transfer`-ovih `except` blokova koji su čitali `current_user.id` posle `db.rollback()`.
+- **P1 #2 (existing-is-None grana nastavlja bez stvarnog claim-a)** — tačno, `_claim_idempotency_key` je vraćao `None` (= "nastavi, ti si vlasnik") kad je konfliktni red nestao pre ponovnog čitanja, a da nikad nije ponovo pokušao INSERT — kasniji `fulfill()` bi tiho ažurirao nepostojeći red i ne bi ostao nikakav replay zapis.
+- **P1 #3 (except HTTPException prezak preuzak, trajno zaglavljen pending)** — tačno, bilo koji izuzetak koji nije `HTTPException` (bag, DB greška) je zaobilazio `release()` i ostavljao placeholder zaglavljen na `pending` zauvek.
+
+**Ispravke (sve testirano uživo protiv prave baze na portu 8001):**
+1. `_claim_idempotency_key` sad ima `for _attempt in range(3):` petlju — kad ponovno čitanje posle neuspelog INSERT-a nađe `existing is None`, umesto da vrati `None` kao da je claim-ovano, petlja ponovo pokušava atomski INSERT.
+2. `_fulfill_idempotency_key` sad baca `RuntimeError` ako očekivani red nedostaje, umesto tihog no-op-a.
+3. `_release_idempotency_key` uvijena u `try/except Exception: await db.rollback()` da greška pri čišćenju ne sakrije originalni izuzetak.
+4. `create_team` i `make_transfer` — `user_id = current_user.id` kao PRVA linija tela funkcije (pre bilo kog claim/DB poziva), sve unutrašnje reference (vlasnička provera, `_fulfill_idempotency_key`, `_release_idempotency_key`) sad koriste `user_id`, nikad `current_user.id` posle mogućeg rollback-a. `except HTTPException:` → `except Exception:` u oba handler-a.
+
+**Test rezultati:**
+- Normalan transfer i dalje radi (200, tačan novi `credit_balance`).
+- Nevažeći transfer (nepostojeći igrač za drop) SA Idempotency-Key headerom → čist `404` (ne 500), a upit u `idempotency_keys` tabeli potvrđuje 0 redova sa tim ključem (claim stvarno oslobođen, ne zaglavljen). Retry istog zahteva sa istim ključem posle toga → ponovo čist `404` (nije blokiran fantomskim pending redom).
+- Ponovljen konkurentni test rase (dve stvarne niti, isti Idempotency-Key, isti transfer) — identično ponašanje kao pre ove izmene: zahtev A → `409`, zahtev B → `200`, retry → čist `200` replay (identičan `credit_balance`). Baza: tačno 1 SELL + 1 BUY u `transfer_history` (nema duplikata uprkos claim-retry petlji i širem exception handling-u).
+- Testni podaci (korisnik, tim, roster, idempotency zapisi) obrisani posle verifikacije.
+
+Preostali poznat gap (dokumentovan u kodu, nije rešen ovde): proces koji se sruši TAČNO između claim i fulfill/release i dalje ostavlja placeholder zaglavljen — treba pozadinski sweep/lease/TTL, van obima ove runde.

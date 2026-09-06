@@ -110,7 +110,7 @@ scraped, not synthetic):
   retry after a timeout replays the original response instead of risking a
   duplicate). Redis caching and the actual load test (k6/locust) are next,
   by mutual agreement, only once there's something to measure against.
-- **Two rounds of independently-verified findings from Codex's review** (the
+- **Three rounds of independently-verified findings from Codex's review** (the
   frontend session periodically reviews main's code and posts findings to
   the handoff doc as `Problems/problemV*.md` on the shared Desktop -- read
   those + the doc's tail before assuming "done"): (1) an idempotency
@@ -124,9 +124,27 @@ scraped, not synthetic):
   across seasons. (2) The first real load test (locust, 100 concurrent,
   backend/loadtest/) caught bcrypt blocking the whole event loop on
   register/login -- fixed with asyncio.to_thread, aggregate p95 dropped
-  310ms -> 54ms. Every finding was re-verified by reading the exact cited
-  code before fixing, not accepted on trust -- worth continuing that habit,
-  Codex's reviews have had a 100% hit rate on real bugs so far.
+  310ms -> 54ms. (3) problemV9: `current_user.id` read after `db.rollback()`
+  in `create_team`/`make_transfer`'s exception handlers -- confirmed by
+  *directly reproducing* the underlying SQLAlchemy behavior (a rollback'd
+  ORM row's `.id` access raises `MissingGreenlet` in async mode), which
+  would've turned an intended 4xx into an unhandled 500 and skipped
+  releasing the idempotency claim; plus a claim-retry gap (a vanished
+  conflicting row was treated as "already claimed" with no placeholder
+  actually inserted) and an `except HTTPException`-only catch that left
+  idempotency claims stuck at "pending" forever on any other exception.
+  Fixed: both routes now capture `user_id = current_user.id` before any DB
+  work and never touch `current_user.id` again afterward, `_claim_idempotency_key`
+  retries the claim (up to 3x) when the conflicting row vanishes, and both
+  handlers now catch `except Exception`. Re-verified: normal transfer still
+  works, an invalid transfer with an Idempotency-Key now returns a clean 404
+  (not 500) with the claim actually released (checked via direct DB query,
+  not just the HTTP response), and the two-thread concurrent race test still
+  shows the same correct 409/200/clean-replay behavior with no duplicate
+  transfer rows. Every finding across all three rounds was re-verified by
+  reading the exact cited code (or reproducing it directly) before fixing,
+  not accepted on trust -- worth continuing that habit, Codex's reviews have
+  had a 100% hit rate on real bugs so far.
 
 ## Blocked on the user
 

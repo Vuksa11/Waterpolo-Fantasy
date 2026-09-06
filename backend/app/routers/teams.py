@@ -86,37 +86,63 @@ async def _claim_idempotency_key(
     the same key with a genuinely different payload silently replays the
     first response rather than 409ing on the mismatch. Fine as long as the
     frontend mints a fresh key per logical operation, not per click.
+
+    Bugs found in a later review round (problemV9), fixed here: (a) if the
+    conflicting row vanished between our failed INSERT and the re-read (its
+    owner released it in the meantime), the old code returned None as if *we*
+    had claimed it -- with no placeholder actually inserted, so a later
+    fulfill() would silently update nothing, leaving no replay record at all.
+    Now retries the claim itself instead of assuming it's safe to proceed
+    unclaimed. (b) callers used to pass `current_user.id` directly here -- an
+    ORM attribute access -- which is fine in THIS function specifically since
+    it never rolls back the caller's transaction, but see the callers below
+    for why they now capture `user_id` as a plain value up front instead.
     """
     if key is None:
         return None
 
-    db.add(IdempotencyKey(user_id=user_id, endpoint=endpoint, key=key, response_status=_IDEMPOTENCY_PENDING, response_body=""))
-    try:
-        await db.commit()
-        return None  # claimed -- caller proceeds
-    except IntegrityError:
-        await db.rollback()
+    for _attempt in range(3):
+        db.add(
+            IdempotencyKey(
+                user_id=user_id, endpoint=endpoint, key=key, response_status=_IDEMPOTENCY_PENDING, response_body=""
+            )
+        )
+        try:
+            await db.commit()
+            return None  # claimed -- caller proceeds
+        except IntegrityError:
+            await db.rollback()
 
-    existing = await db.scalar(
-        select(IdempotencyKey).where(
-            IdempotencyKey.user_id == user_id, IdempotencyKey.endpoint == endpoint, IdempotencyKey.key == key
+        existing = await db.scalar(
+            select(IdempotencyKey).where(
+                IdempotencyKey.user_id == user_id, IdempotencyKey.endpoint == endpoint, IdempotencyKey.key == key
+            )
         )
+        if existing is None:
+            continue  # the row we lost to vanished (its owner released it) -- try claiming it ourselves
+        if existing.response_status == _IDEMPOTENCY_PENDING:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "A request with this Idempotency-Key is already in progress. Retry shortly.",
+            )
+        return TeamOut.model_validate_json(existing.response_body)
+
+    raise HTTPException(
+        status.HTTP_409_CONFLICT, "Could not claim this Idempotency-Key after several attempts. Retry shortly."
     )
-    if existing is None:
-        return None  # lost a race with a since-released claim; safe to proceed
-    if existing.response_status == _IDEMPOTENCY_PENDING:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "A request with this Idempotency-Key is already in progress. Retry shortly.",
-        )
-    return TeamOut.model_validate_json(existing.response_body)
 
 
 async def _fulfill_idempotency_key(
     db: AsyncSession, user_id: uuid.UUID, endpoint: str, key: str | None, status_code: int, body: TeamOut
 ) -> None:
     """Fill in a claimed placeholder with the real response. Caller commits
-    this together with its own business writes -- not committed here."""
+    this together with its own business writes -- not committed here.
+
+    Raises if the row is missing rather than silently no-op'ing (problemV9):
+    if `_claim_idempotency_key` returned None (claimed), this row must exist
+    by construction -- a missing row here means something else deleted our
+    claim underneath us, which should be loud, not swallowed.
+    """
     if key is None:
         return
     row = await db.scalar(
@@ -124,28 +150,43 @@ async def _fulfill_idempotency_key(
             IdempotencyKey.user_id == user_id, IdempotencyKey.endpoint == endpoint, IdempotencyKey.key == key
         )
     )
-    if row is not None:
-        row.response_status = status_code
-        row.response_body = body.model_dump_json()
+    if row is None:
+        raise RuntimeError(f"Idempotency claim for {endpoint!r} disappeared before it could be fulfilled")
+    row.response_status = status_code
+    row.response_body = body.model_dump_json()
 
 
 async def _release_idempotency_key(db: AsyncSession, user_id: uuid.UUID, endpoint: str, key: str | None) -> None:
-    """Drop a claimed-but-never-fulfilled placeholder (the operation failed
-    with a client error) so a retry with the same key -- e.g. after fixing a
-    validation error -- isn't stuck behind a permanent 409."""
+    """Drop a claimed-but-never-fulfilled placeholder (the operation failed)
+    so a retry with the same key -- e.g. after fixing a validation error --
+    isn't stuck behind a permanent 409. Best-effort: swallows its own errors
+    so a cleanup failure never masks the original exception that triggered
+    it (callers run this from an `except` block).
+
+    Known gap (problemV9, not fixed here): this only runs when the route
+    handler's own exception handler executes. A killed process, a cancelled
+    asyncio task, or an error while *this* function itself is running (e.g.
+    the MissingGreenlet class of bug fixed elsewhere in this file) can still
+    leave a placeholder stuck at pending forever, 409ing every retry. Needs
+    either a background sweep of old pending rows or a lease/TTL redesign
+    before that failure mode is actually closed -- tracked, not solved.
+    """
     if key is None:
         return
-    row = await db.scalar(
-        select(IdempotencyKey).where(
-            IdempotencyKey.user_id == user_id,
-            IdempotencyKey.endpoint == endpoint,
-            IdempotencyKey.key == key,
-            IdempotencyKey.response_status == _IDEMPOTENCY_PENDING,
+    try:
+        row = await db.scalar(
+            select(IdempotencyKey).where(
+                IdempotencyKey.user_id == user_id,
+                IdempotencyKey.endpoint == endpoint,
+                IdempotencyKey.key == key,
+                IdempotencyKey.response_status == _IDEMPOTENCY_PENDING,
+            )
         )
-    )
-    if row is not None:
-        await db.delete(row)
-        await db.commit()
+        if row is not None:
+            await db.delete(row)
+            await db.commit()
+    except Exception:
+        await db.rollback()
 
 
 async def _get_active_season(db: AsyncSession, competition_id: uuid.UUID) -> Season:
@@ -249,8 +290,17 @@ async def create_team(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TeamOut:
+    # Captured as a plain value up front, not read as `current_user.id` again
+    # later -- problemV9 caught that `db.rollback()` expires loaded ORM
+    # attributes even with expire_on_commit=False, and re-accessing one
+    # afterward raises MissingGreenlet in async SQLAlchemy (reproduced
+    # directly: a rollback'd row's .id access throws). Reading
+    # `current_user.id` from inside the `except` block below, after this
+    # function's own rollback, would turn an intended 4xx into an
+    # unhandled 500 -- and skip releasing the idempotency claim entirely.
+    user_id = current_user.id
     endpoint = "POST /api/teams"
-    claimed = await _claim_idempotency_key(db, current_user.id, endpoint, idempotency_key)
+    claimed = await _claim_idempotency_key(db, user_id, endpoint, idempotency_key)
     if claimed is not None:
         return claimed
 
@@ -270,9 +320,7 @@ async def create_team(
         # need a unique constraint on (user_id, league_id) in fantasy_teams
         # to close fully. Not fixed here -- tracked as a follow-up.
         existing = await db.scalar(
-            select(FantasyTeam).where(
-                FantasyTeam.user_id == current_user.id, FantasyTeam.league_id == league.id
-            )
+            select(FantasyTeam).where(FantasyTeam.user_id == user_id, FantasyTeam.league_id == league.id)
         )
         if existing is not None:
             raise HTTPException(status.HTTP_409_CONFLICT, "You already have a team in this league")
@@ -293,7 +341,7 @@ async def create_team(
             raise HTTPException(422, f"Roster costs {total_cost:.2f} credits, budget is {BUDGET:.0f}")
 
         team = FantasyTeam(
-            user_id=current_user.id,
+            user_id=user_id,
             league_id=league.id,
             season_id=season.id,
             name=body.name,
@@ -331,12 +379,19 @@ async def create_team(
             wildcard_used=team.wildcard_used,
             roster=await _roster_out(db, team.id),
         )
-        await _fulfill_idempotency_key(db, current_user.id, endpoint, idempotency_key, status.HTTP_201_CREATED, result_out)
+        await _fulfill_idempotency_key(db, user_id, endpoint, idempotency_key, status.HTTP_201_CREATED, result_out)
         await db.commit()  # single atomic commit: team + roster + idempotency record together
         return result_out
-    except HTTPException:
+    except Exception:
+        # Not `except HTTPException` -- problemV9 pointed out a plain
+        # HTTPException-only catch leaves the idempotency claim stuck at
+        # "pending" forever for any OTHER exception (a bug, a DB error), not
+        # just a process crash. Broadening this doesn't fully solve that
+        # (still nothing recovers a claim if release() itself never runs --
+        # see _release_idempotency_key's docstring) but it closes the gap
+        # for every failure this process can actually catch and act on.
         await db.rollback()
-        await _release_idempotency_key(db, current_user.id, endpoint, idempotency_key)
+        await _release_idempotency_key(db, user_id, endpoint, idempotency_key)
         raise
 
 
@@ -369,8 +424,12 @@ async def make_transfer(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TeamOut:
+    # Captured before any DB work so it's never touched after a possible
+    # rollback below -- see create_team's comment / problemV9 (MissingGreenlet:
+    # accessing an ORM attribute post-rollback raises in async SQLAlchemy).
+    user_id = current_user.id
     endpoint = f"POST /api/teams/{team_id}/transfers"
-    claimed = await _claim_idempotency_key(db, current_user.id, endpoint, idempotency_key)
+    claimed = await _claim_idempotency_key(db, user_id, endpoint, idempotency_key)
     if claimed is not None:
         return claimed
 
@@ -384,7 +443,7 @@ async def make_transfer(
         team = await db.scalar(select(FantasyTeam).where(FantasyTeam.id == team_id).with_for_update())
         if team is None:
             raise HTTPException(404, "Team not found")
-        if team.user_id != current_user.id:
+        if team.user_id != user_id:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your team")
 
         try:
@@ -467,10 +526,17 @@ async def make_transfer(
             wildcard_used=team.wildcard_used,
             roster=await _roster_out(db, team.id),
         )
-        await _fulfill_idempotency_key(db, current_user.id, endpoint, idempotency_key, status.HTTP_200_OK, result_out)
+        await _fulfill_idempotency_key(db, user_id, endpoint, idempotency_key, status.HTTP_200_OK, result_out)
         await db.commit()  # single atomic commit: transfer + idempotency record together
         return result_out
-    except HTTPException:
+    except Exception:
+        # Not `except HTTPException` -- problemV9 pointed out a plain
+        # HTTPException-only catch leaves the idempotency claim stuck at
+        # "pending" forever for any OTHER exception (a bug, a DB error), not
+        # just a process crash. Broadening this doesn't fully solve that
+        # (still nothing recovers a claim if release() itself never runs --
+        # see _release_idempotency_key's docstring) but it closes the gap
+        # for every failure this process can actually catch and act on.
         await db.rollback()
-        await _release_idempotency_key(db, current_user.id, endpoint, idempotency_key)
+        await _release_idempotency_key(db, user_id, endpoint, idempotency_key)
         raise
