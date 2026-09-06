@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from db.models import (
+    Coach,
     Competition,
     Match,
     Matchday,
@@ -204,3 +205,37 @@ def upsert_box_score(session: Session, competition: Competition, match: Match, b
     match.away_score = box.away_score
     match.status = MatchStatus.FINISHED if box.status.lower() == "finished" else MatchStatus.LIVE
     session.flush()
+
+
+def get_or_create_placeholder_coach(session: Session, competition: Competition, real_club: str) -> Coach:
+    """
+    Placeholder until real coach data is provided (see docs, Section 7, Next
+    Steps) -- one generic coach per (competition, club), name clearly marked
+    TBD so it's obvious in the data which rows still need replacing with the
+    real name/mapping once that arrives.
+    """
+    coach = session.scalar(
+        select(Coach).where(Coach.competition_id == competition.id, Coach.real_club == real_club)
+    )
+    if coach is None:
+        coach = Coach(
+            competition_id=competition.id,
+            name=f"{real_club} — trener TBD",
+            real_club=real_club,
+        )
+        session.add(coach)
+        session.flush()
+    return coach
+
+
+def create_placeholder_coaches_for_competition(session: Session, competition: Competition) -> int:
+    """Create a placeholder coach for every club with at least one scraped
+    player in this competition. Idempotent -- safe to re-run."""
+    clubs = {
+        row[0]
+        for row in session.query(Player.real_club).filter(Player.competition_id == competition.id).distinct().all()
+    }
+    for club in clubs:
+        get_or_create_placeholder_coach(session, competition, club)
+    session.commit()
+    return len(clubs)

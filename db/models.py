@@ -207,7 +207,11 @@ class Coach(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     competition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("competitions.id"), nullable=False)
-    external_id: Mapped[str] = mapped_column(String, nullable=False)
+    # Nullable: no coach data source has been scraped yet (see docs, Section
+    # 7). Coaches are currently generic placeholders created directly in the
+    # database (one per club, name suffixed "— trener TBD"), with no external
+    # site id to attach until a real source/mapping is provided.
+    external_id: Mapped[str | None] = mapped_column(String)
     name: Mapped[str] = mapped_column(String, nullable=False)
     real_club: Mapped[str] = mapped_column(String, nullable=False)
     current_cost: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=7)
