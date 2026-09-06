@@ -74,6 +74,17 @@ async def roster_fixture(db_session):
     cheapest coach could exceed BUDGET depending on the current price data.
     So this scans every competition and picks the first one that actually has
     a full, affordable, distinct roster, and skips only if NONE of them do.
+
+    problemV12 caught a further gap here: an affordable STARTING roster
+    doesn't imply the specific transfer the tests perform (sell the most
+    expensive of the 11, buy the cheapest spare player) is itself affordable
+    -- e.g. 11 players at 8 + a 12-cost coach == 100 (fits), but selling an
+    8-cost player to buy a 9-cost one leaves -1 credits, a real 422 that has
+    nothing to do with the code under test. So `drop_player`/`extra_player`
+    below are chosen explicitly to satisfy
+    `starting_balance + drop.current_cost - extra.current_cost >= 0`, trying
+    progressively more (cheap spare, then priciest-in-roster-to-sell)
+    candidates before giving up on a competition.
     """
     competitions = list((await db_session.scalars(select(Competition))).all())
     if not competitions:
@@ -96,21 +107,41 @@ async def roster_fixture(db_session):
         if len(players) < 11 or coach is None:
             continue
 
-        extra_player = await db_session.scalar(
-            select(Player)
-            .where(Player.competition_id == competition.id, Player.id.notin_([p.id for p in players]))
-            .order_by(Player.current_cost.asc(), Player.id.asc())
+        spare_players = list(
+            (
+                await db_session.scalars(
+                    select(Player)
+                    .where(Player.competition_id == competition.id, Player.id.notin_([p.id for p in players]))
+                    .order_by(Player.current_cost.asc(), Player.id.asc())
+                    .limit(20)
+                )
+            ).all()
         )
-        if extra_player is None:
+        if not spare_players:
             continue
 
         roster_cost = sum(float(p.current_cost) for p in players) + float(coach.current_cost)
         if roster_cost > BUDGET:
             continue
+        starting_balance = BUDGET - roster_cost
+
+        # Try selling the most expensive roster player first (maximizes sell
+        # proceeds), against every spare candidate cheapest-first, until one
+        # transfer actually clears the budget check.
+        drop_player = extra_player = None
+        for candidate_drop in sorted(players, key=lambda p: -float(p.current_cost)):
+            for candidate_extra in spare_players:
+                if starting_balance + float(candidate_drop.current_cost) - float(candidate_extra.current_cost) >= 0:
+                    drop_player, extra_player = candidate_drop, candidate_extra
+                    break
+            if drop_player is not None:
+                break
+        if drop_player is None:
+            continue
 
         break
     else:
-        pytest.skip("no competition in dev DB currently has an affordable 11-player + coach roster")
+        pytest.skip("no competition in dev DB currently has an affordable roster AND an affordable test transfer")
 
     email = f"idempotency-test-{uuid.uuid4()}@example.com"
     user = User(email=email, password_hash="x", display_name="Idempotency Test")
@@ -121,10 +152,11 @@ async def roster_fixture(db_session):
     yield {
         "competition_id": competition.id,
         "players": players,
+        "drop_player": drop_player,
         "extra_player": extra_player,
         "coach": coach,
         "user_id": user.id,
-        "starting_balance": BUDGET - roster_cost,
+        "starting_balance": starting_balance,
     }
 
     # Cleanup: delete anything this test created, in FK-safe order.
@@ -165,7 +197,7 @@ async def test_create_team_and_transfer_succeed(client, roster_fixture):
     assert resp.status_code == 201, resp.text
     team = resp.json()
 
-    drop_id = str(roster_fixture["players"][0].id)
+    drop_id = str(roster_fixture["drop_player"].id)
     add_id = str(roster_fixture["extra_player"].id)
     resp = await client.post(
         f"/api/teams/{team['id']}/transfers",
@@ -237,7 +269,7 @@ async def test_concurrent_same_key_transfer_serializes(client, roster_fixture, d
     team = resp.json()
     starting_balance = roster_fixture["starting_balance"]
 
-    drop_player = roster_fixture["players"][0]
+    drop_player = roster_fixture["drop_player"]
     add_player = roster_fixture["extra_player"]
     drop_id = str(drop_player.id)
     add_id = str(add_player.id)
