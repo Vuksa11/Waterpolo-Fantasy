@@ -62,8 +62,7 @@ proverava da li je traženi sastav već sačuvan, bez slepog ponavljanja upisa.
 Serverska podrška za Idempotency-Key, /home i prošireni teams/lineup ugovor
 sada je spojena iz main-a. Oporavak pending ključa posle pada procesa i dalje
 je otvoren backend problem. Tabela ima odvojene tabove klubova i fantasy timova;
-fantasy bodovanje još nije kompletirano, što je označeno u prikazu. Novi auth
-rate limiter iz Claudeovog radnog stabla nije uključen dok se ne završi pregled.
+fantasy bodovanje još nije kompletirano, što je označeno u prikazu. Auth rate limiter je integrisan; frontend proxy prepisuje X-Forwarded-For direktnom adresom klijenta. Za dodatne produkcione proxy slojeve potrebno je uskladiti trusted proxy konfiguraciju.
 
 Browser test sa izolovanim API odgovorima (bez upisa u bazu):
 
@@ -74,3 +73,10 @@ CHROMIUM_PATH=/putanja/do/chromium python scripts/test_frontend_browser.py
 Pokrenuti iz korena repozitorijuma uz aktivan frontend na 3000, Python Playwright
 paket i Chromium. `FRONTEND_URL` može promeniti adresu. Ovaj test potvrđuje frontend
 ugovor, ne predstavlja live PostgreSQL integracioni test niti test opterećenja.
+
+
+Email/reset linkovi: `/verify-email?token=...` i `/reset-password?token=...`.
+Frontend uklanja token iz URL-a i traži eksplicitnu potvrdu. Dostava emaila na
+backendu je još stub; UI ne tvrdi da su emailovi poslati. Posle resetovanja
+lokalna sesija se briše, a poništavanje drugih sesija još je backend nalaz V16.
+Browser provera: `CHROMIUM_PATH=/putanja/chromium python scripts/test_account_links_browser.py`.

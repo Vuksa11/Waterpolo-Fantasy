@@ -9,6 +9,7 @@ import {
   roleAccepts,
 } from "./lineup.js";
 import { roundTitle } from "./round.js";
+import { showAccountLink } from "./account-link.js";
 import { request, catalogQuery, peekCache, clearPublicCache } from "./api.js";
 import {
   demoPlayers,
@@ -971,6 +972,19 @@ function authModal(register = false) {
   modal(
     `<div class="eyebrow">DOBRO DOŠAO U EKIPU</div><h2>${register ? "Napravi nalog" : "Prijavi se"}</h2><form id="auth-form">${register ? '<label>Ime<input name="display_name" autocomplete="nickname" required maxlength="60"></label>' : ""}<label>Email<input name="email" type="email" autocomplete="email" required maxlength="254"></label><label>Lozinka<input name="password" type="password" autocomplete="${register ? "new-password" : "current-password"}" required minlength="8"></label><div id="auth-error" class="inline-error" role="alert"></div><button class="primary full">${register ? "Registruj se" : "Prijavi se"}</button></form><button class="text-link auth-switch" id="switch-auth">${register ? "Već imaš nalog? Prijavi se" : "Nemaš nalog? Registruj se"}</button>`,
   );
+  if (!register) {
+    const help = document.createElement("button");
+    help.className = "text-link";
+    help.textContent = "Zaboravljena lozinka?";
+    help.onclick = () =>
+      modal(
+        '<h2>Oporavak naloga</h2><p>Dostava emailova za oporavak još nije dostupna. Ako već imaš važeći link za promenu lozinke, otvori ga da postaviš novu.</p><button class="secondary" id="back-to-login">Nazad na prijavu</button>',
+      );
+    help.addEventListener("click", () => {
+      $("#back-to-login").onclick = () => authModal(false);
+    });
+    $("#auth-form").after(help);
+  }
   $("#switch-auth").onclick = () => authModal(!register);
   $("#auth-form").onsubmit = async (e) => {
     e.preventDefault();
@@ -1181,7 +1195,9 @@ function bind() {
   );
   bindCatalog();
 }
-if (token)
+if (["/verify-email", "/reset-password"].includes(location.pathname)) {
+  showAccountLink();
+} else if (token)
   request("/auth/me", { token })
     .then((u) => {
       user = u;

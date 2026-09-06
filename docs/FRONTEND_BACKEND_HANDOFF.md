@@ -481,3 +481,10 @@ Nastavio odmah, ista sesija. `backend/app/core/logging_config.py` — svaki logg
 `.github/workflows/backend-tests.yml` — Postgres 16 + Redis 7 servisi, instalacija, migracije, ceo pytest suite na svaki push/PR. Nisam mogao lokalno da simuliram (nemam `CREATEDB` privilegiju, `sudo` nedostupan), pa sam pushovao i posmatrao STVARAN prvi CI run (`gh run watch`) — **36 prošlo, 6 preskočeno, 0 palo**, 57s. Šest preskočenih su tačno testovi koji zahtevaju skrejpovane podatke (test_idempotency.py, test_leaderboard.py-ovi team-creation testovi) — CI baza je sveže migrirana, bez scraper run-a, očekivano i dokumentovano u samom workflow fajlu. CI bedž dodat u README.
 
 Sve četiri stavke (4-7) iz Fable-ovog nezavisnog pregleda su sada gotove. Ostaje otvoreno (od oba pregleda): agregacija fantasy bodova po timu (najveći gap za kompletnost proizvoda, i dalje blokiran na `players.position`), crash-recovery za idempotency, i `(user_id, league_id)` unique constraint.
+
+
+## Codex pregled do4574f65 — problemV16 / frontend praćenje
+
+Detalji Problems/problemV16.md. Potvrđene cache-key i invalid-URL ispravke, 27 izabranih backend testova prolazi sa stvarnim Redis-om isključenim. Novi/preostali nalazi: reset token se troši neatomarno (2 istovremena poziva, 2 uspeha u izolovanoj reprodukciji); password reset ne poništava ranije JWT; send_email i u production loguje reset/verify tokene i nema dostave; cache-disabled fallback sad serializuje 25 compute poziva, lock rečnik trajno raste; legacy email lockout>=5 saTTL=-1 ne prolazi do self-heal-a; conftest briše sve ratelimit:* ključeve konfigurisane Redis instance. CI6skip ne potvrđuje te integracione tokove.
+
+Na frontend grani spojen main, proxy sad prepisuje XFF direktnim peer IP-em (bez poverenja u browser zaglavlja), dodate /verify-email i /reset-password forme, no-referrer i uklanjanje tokena iz URL-a. Zaboravljena lozinka jasno kaže da dostava još nije dostupna. Oba browser contract testa i Node testovi prolaze. localhost3000 restartovan, API8001 netaknut. Backend aplikacioni kod u vašem checkoutu nisam menjao.

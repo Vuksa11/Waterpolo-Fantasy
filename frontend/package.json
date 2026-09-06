@@ -6,7 +6,7 @@
     "dev": "node server.mjs",
     "start": "node server.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check src/app.js && node --check src/api.js && node --check src/lineup.js && node --check src/round.js"
+    "check": "node --check src/app.js && node --check src/api.js && node --check src/lineup.js && node --check src/round.js && node --check src/account-link.js && node --check server.mjs && node --check proxy.mjs"
   },
   "engines": {
     "node": ">=20"

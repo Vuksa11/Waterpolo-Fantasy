@@ -3008,3 +3008,32 @@ footer {
 .fantasy-table {
   min-width: 0;
 }
+.account-link {
+  max-width: 560px;
+  margin: 40px auto;
+  padding: 16px;
+}
+.account-link > .card {
+  margin-top: 20px;
+}
+.account-link h1 {
+  font-size: 30px;
+}
+.account-link-body {
+  padding: 20px;
+}
+.account-link label {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.account-link input {
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #cbdce7;
+  border-radius: 8px;
+}
+.account-link button {
+  width: 100%;
+}

@@ -1,4 +1,5 @@
 import http from "node:http";
+import { proxyHeaders } from "./proxy.mjs";
 import https from "node:https";
 import { readFile, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -16,6 +17,7 @@ const types = {
 };
 const server = http.createServer(async (req, res) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
   const raw = req.url || "/";
   if (raw.startsWith("/api/") || raw === "/health") {
     const transport = upstream.protocol === "https:" ? https : http;
@@ -25,7 +27,11 @@ const server = http.createServer(async (req, res) => {
         port: upstream.port,
         path: raw,
         method: req.method,
-        headers: { ...req.headers, host: upstream.host },
+        headers: proxyHeaders(
+          req.headers,
+          req.socket.remoteAddress,
+          upstream.host,
+        ),
         timeout: 15000,
       },
       (r) => {
@@ -58,7 +64,9 @@ const server = http.createServer(async (req, res) => {
       new URL(raw, "http://localhost").pathname,
     );
     // Only expose frontend assets. Never expose repository, .env or server sources.
-    let rel = pathname === "/" ? "index.html" : pathname.replace(/^\//, "");
+    let rel = ["/", "/verify-email", "/reset-password"].includes(pathname)
+      ? "index.html"
+      : pathname.replace(/^\//, "");
     if (rel.startsWith("assets/")) rel = "public/" + rel;
     if (
       rel !== "index.html" &&
