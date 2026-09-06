@@ -45,3 +45,31 @@ PYTHONPATH=backend:. python scripts/verify_frontend_e2e.py
 Browser checks cover all routes at320,390,768,1024,1440 widths, three formations, empty-role feedback, substitutions, captain, reload persistence, pool/list mode, real login and save. PostgreSQL tests cover simultaneous registration, version conflict and transfer attempts; fixtures are cleaned afterward. Synthetic10,010-player catalog tests prove bounded pagination, not an unlimited user capacity guarantee.
 
 Design rationale/sources: `../docs/DESIGN_DECISIONS.md`. Integration contract: `../docs/FRONTEND_BACKEND_HANDOFF.md`.
+
+### Učitavanje i ponovljeni zahtevi
+
+Početna koristi javni `GET /api/home?competition_id=...`. Stariji backend koji
+vrati 404 koristi postojeće matchdays/matches rute. Ostali javni blokovi učitavaju
+se nezavisno, sa zasebnim stanjem greške. Katalog pamti najviše 40 javnih rezultata,
+sa rokom 30 sekundi; transfer briše javni keš. Privatni timovi ne ulaze u taj keš.
+
+Kreiranje tima i transfer šalju `Idempotency-Key`. Isti neizvesni zahtev zadržava
+ključ u sessionStorage i memoriji za ručno ponavljanje; paralelni isti zahtevi dele
+jedan poziv. Ključ se odvaja po tokenu, putanji i telu preko SHA-256; token se ne
+čuva u identifikatoru ključa. Posle neizvesnog PUT sastava front čita server i
+proverava da li je traženi sastav već sačuvan, bez slepog ponavljanja upisa.
+
+Serverska podrška je obavezna za garanciju idempotentnosti. Backend ove frontend
+grane još nije dobio Claudeovu idempotency implementaciju. Njegov main, zasebno,
+još čeka usklađivanje proširenog team/lineup ugovora i oporavak pending zahteva.
+Slanje header-a samo po sebi ne rešava te backend zavisnosti.
+
+Browser test sa izolovanim API odgovorima (bez upisa u bazu):
+
+```bash
+CHROMIUM_PATH=/putanja/do/chromium python scripts/test_frontend_browser.py
+```
+
+Pokrenuti iz korena repozitorijuma uz aktivan frontend na 3000, Python Playwright
+paket i Chromium. `FRONTEND_URL` može promeniti adresu. Ovaj test potvrđuje frontend
+ugovor, ne predstavlja live PostgreSQL integracioni test niti test opterećenja.

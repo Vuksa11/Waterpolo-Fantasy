@@ -8,7 +8,8 @@ import {
   safeDraft,
   roleAccepts,
 } from "./lineup.js";
-import { request, catalogQuery } from "./api.js";
+import { roundTitle } from "./round.js";
+import { request, catalogQuery, peekCache, clearPublicCache } from "./api.js";
 import {
   demoPlayers,
   demoCompetition,
@@ -109,6 +110,7 @@ function toast(message) {
   window.toastTimer = setTimeout(() => el.classList.remove("show"), 4500);
 }
 function setPage(value) {
+  if (busy) return;
   page = value in names ? value : "home";
   location.hash = page;
   render();
@@ -181,7 +183,7 @@ function tableRows(limit = 100) {
 }
 function miniStandings() {
   return `<section class="card"><div class="card-head"><h3>Vrh regionalne lige</h3><span class="eyebrow">BOD.</span></div>${
-    standings
+    (homeTop ?? standings)
       .slice(0, 4)
       .map(
         (r, i) =>
@@ -211,8 +213,15 @@ function bench() {
   return `<section class="card bench-card"><div class="card-head"><div><div class="eyebrow">KLUPA I STRUČNI ŠTAB</div><h3>Rezerve</h3></div><span class="pill">${list.length} igrača + ${draft.coach ? "1 trener" : "trener"}</span></div><div class="bench-grid"><button class="bench-slot coach" id="coach"><span class="role-tag">TRENER</span><span class="player-circle">${draft.coach ? "T" : "+"}</span><b>${esc(draft.coach?.name || "Izaberi trenera")}</b><small>${draft.coach ? money(draft.coach.current_cost) + " kr" : "Čeka potvrđene podatke"}</small></button>${list.map((p) => `<button class="bench-slot" data-bench="${esc(p.id)}"><span class="role-tag">${p.position || "?"}</span><span class="player-circle">${short(p.name)}</span><b>${esc(p.name)}</b><small>${esc(p.real_club)} · ${money(p.current_cost)} kr</small></button>`).join("")}${Array.from({ length: Math.max(0, 4 - list.length) }, (_, i) => `<button class="bench-slot" data-go="players"><span class="role-tag">REZERVA</span><span class="player-circle">+</span><b>Izaberi igrača</b><small>GK · CF/CB · OT · OT</small></button>`).join("")}</div></section>`;
 }
 function team() {
+  if (teamLoading) return loadingCards("Učitavam tvoj sačuvani tim…");
+  if (
+    mode === "api" &&
+    dataStates.team &&
+    !["ready", "loading"].includes(dataStates.team)
+  )
+    return "";
   const f = FORMATIONS[draft.formation];
-  return `<section class="team-banner"><div class="round-number">${esc(currentDay()?.number || "—")}<small>KOLO</small></div><div><span class="hero-pill">${mode === "demo" ? "DEMO SASTAV" : serverTeam ? "TIM NA SERVERU" : "LOKALNI NACRT"}</span><h1>Tim ${esc(draft.name)}</h1></div><div class="deadline-copy"><span>Zaključavanje sastava</span><strong>${currentDay()?.deadline ? new Date(currentDay().deadline).toLocaleString("sr-Latn", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "Rok nije objavljen"}</strong></div></section><div class="team-layout"><aside class="team-summary card"><div class="card-head"><h3>Pregled tima</h3><button class="text-link" id="rename" aria-label="Promeni ime tima">✎</button></div><div class="summary-content"><h2>${esc(draft.name)}</h2><label class="eyebrow">FORMACIJA</label>${formControl()}<p class="formation-description">${f.description}</p><div class="gauge-head"><b>Krediti</b><span>${money(100 - budget())} / 100</span></div><div class="gauge"><i style="width:${Math.min(100, 100 - budget())}%"></i></div><div class="sub">${money(budget())} kredita za pojačanja</div><div class="summary-stats"><div><span>Igrači</span><strong>${draft.roster.length}/11</strong></div><div><span>Kapiten</span><strong>${esc(
+  return `<section class="team-banner"><div class="round-number">${esc(roundTitle(currentDay()).title)}<small>${roundTitle(currentDay()).caption}</small></div><div><span class="hero-pill">${mode === "demo" ? "DEMO SASTAV" : serverTeam ? "TIM NA SERVERU" : "LOKALNI NACRT"}</span><h1>Tim ${esc(draft.name)}</h1></div><div class="deadline-copy"><span>Zaključavanje sastava</span><strong>${currentDay()?.deadline ? new Date(currentDay().deadline).toLocaleString("sr-Latn", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "Rok nije objavljen"}</strong></div></section><div class="team-layout"><aside class="team-summary card"><div class="card-head"><h3>Pregled tima</h3><button class="text-link" id="rename" aria-label="Promeni ime tima">✎</button></div><div class="summary-content"><h2>${esc(draft.name)}</h2><label class="eyebrow">FORMACIJA</label>${formControl()}<p class="formation-description">${f.description}</p><div class="gauge-head"><b>Krediti</b><span>${money(100 - budget())} / 100</span></div><div class="gauge"><i style="width:${Math.min(100, 100 - budget())}%"></i></div><div class="sub">${money(budget())} kredita za pojačanja</div><div class="summary-stats"><div><span>Igrači</span><strong>${draft.roster.length}/11</strong></div><div><span>Kapiten</span><strong>${esc(
     draft.roster
       .find((p) => p.id === draft.captain)
       ?.name.split(" ")
@@ -288,12 +297,48 @@ function render() {
       )
       .join(
         "",
-      )}</nav><button class="user-chip" id="account"><span class="online-dot"></span>${esc(user?.display_name || "Moj nalog")}</button></header><div class="context-bar"><select id="competition" aria-label="Takmičenje">${competitions.map((c) => `<option value="${c.id}" ${c.id === competition ? "selected" : ""}>${esc(c.name)}</option>`).join("") || "<option>Izaberi takmičenje</option>"}</select><div class="mode-switch"><span class="tiny">Izvor podataka</span><button data-mode="demo" class="${mode === "demo" ? "chosen" : ""}">Demo</button><button data-mode="api" class="${mode === "api" ? "chosen" : ""}">API</button></div></div><main id="main">${status === "loading" ? '<div class="loading"><span class="spinner"></span> Povezujem podatke…</div>' : status === "error" ? `<div class="error-box"><h2>Podaci nisu dostupni</h2><p>${esc(error)}</p><button class="primary" id="retry">Pokušaj ponovo</button><button class="secondary" data-mode="demo">Istraži Demo</button></div>` : { home, team, players: playersPage, fixtures: fixturesPage, standings: standingsPage, news: newsPage }[page]()}</main><footer><span>VRL FANTASY · Nezvanični koncept &nbsp; / &nbsp; ${mode === "demo" ? "DEMO PODACI" : "PODACI IZ API-JA"}</span><span><button id="rules">Kako se igra</button> &nbsp; · &nbsp; <a href="https://wpolo.me/odrzan-sastanak-vaterpolo-i-plivackog-saveza-crne-gore-i-vaterpolo-saveza-srbije/" target="_blank" rel="noopener">VRL ↗</a></span></footer>`;
+      )}</nav><button class="user-chip" id="account"><span class="online-dot"></span>${esc(user?.display_name || "Moj nalog")}</button></header><div class="context-bar"><select id="competition" aria-label="Takmičenje">${competitions.map((c) => `<option value="${c.id}" ${c.id === competition ? "selected" : ""}>${esc(c.name)}</option>`).join("") || "<option>Izaberi takmičenje</option>"}</select><div class="mode-switch"><span class="tiny">Izvor podataka</span><button data-mode="demo" class="${mode === "demo" ? "chosen" : ""}">Demo</button><button data-mode="api" class="${mode === "api" ? "chosen" : ""}">API</button></div></div><main id="main">${status === "loading" ? loadingCards("Povezujem podatke…") : status === "error" ? `<div class="error-box"><h2>Podaci nisu dostupni</h2><p>${esc(error)}</p><button class="primary" id="retry">Pokušaj ponovo</button><button class="secondary" data-mode="demo">Istraži Demo</button></div>` : dataNotices() + { home, team, players: playersPage, fixtures: fixturesPage, standings: standingsPage, news: newsPage }[page]()}</main><footer><span>VRL FANTASY · Nezvanični koncept &nbsp; / &nbsp; ${mode === "demo" ? "DEMO PODACI" : "PODACI IZ API-JA"}</span><span><button id="rules">Kako se igra</button> &nbsp; · &nbsp; <a href="https://wpolo.me/odrzan-sastanak-vaterpolo-i-plivackog-saveza-crne-gore-i-vaterpolo-saveza-srbije/" target="_blank" rel="noopener">VRL ↗</a></span></footer>`;
   bind();
+  $$("#retry-data").forEach((b) => (b.onclick = bootstrap));
+  if (busy)
+    $$("#app button, #app select, #app input").forEach(
+      (el) => (el.disabled = true),
+    );
+}
+let homeTop = null;
+let teamLoading = false;
+let dataStates = {};
+function loadingCards(label = "Učitavam podatke…") {
+  return `<div class="loading-cards" role="status" aria-label="${label}"><p>${label}</p><div></div><div></div><div></div></div>`;
+}
+function dataNotices() {
+  const relevant =
+    {
+      home: ["home"],
+      team: ["home", "days", "team", "coaches"],
+      players: ["facets"],
+      fixtures: ["home", "days"],
+      standings: ["standings"],
+      news: [],
+    }[page] || [];
+  return relevant
+    .map((key) =>
+      dataStates[key] === "loading"
+        ? loadingCards()
+        : dataStates[key] && dataStates[key] !== "ready"
+          ? `<div class="notice" role="alert">${esc(dataStates[key])} <button class="text-link" id="retry-data">Pokušaj ponovo</button></div>`
+          : "",
+    )
+    .join("");
 }
 async function bootstrap() {
   const id = ++viewId;
   controller?.abort();
+  catalogController?.abort();
+  ++catalogVersion;
+  dataStates = {};
+  homeTop = null;
+  teamLoading = false;
   controller = new AbortController();
   status = "loading";
   error = "";
@@ -328,38 +373,102 @@ async function bootstrap() {
     if (!competitions.some((c) => c.id === competition))
       competition = competitions[0].id;
     readDraft();
-    const [days, table, options, coachList] = await Promise.all([
-      request(`/competitions/${competition}/matchdays`, {
-        signal: controller.signal,
+    const signal = controller.signal;
+    const scope = competition;
+    matches = [];
+    standings = [];
+    matchdays = [];
+    coaches = [];
+    serverTeam = null;
+    facets = { clubs: [], positions: ["GK", "OT", "CF", "CB"] };
+    teamLoading = Boolean(token && user);
+    const job = async (key, action) => {
+      dataStates[key] = "loading";
+      try {
+        await action();
+        if (id === viewId) dataStates[key] = "ready";
+      } catch (e) {
+        if (id === viewId && e.name !== "AbortError")
+          dataStates[key] = e.message;
+      }
+      if (id === viewId) render();
+    };
+    const homeTask = job("home", async () => {
+      let bundle;
+      try {
+        bundle = await request(`/home?competition_id=${scope}`, {
+          signal,
+          cacheMs: 30000,
+        });
+      } catch (e) {
+        if (e.status !== 404) throw e;
+        // Older validated backend deployments retain the existing public routes.
+        const days = await request(`/competitions/${scope}/matchdays`, {
+          signal,
+        });
+        const day = days.find((d) => d.status === "UPCOMING") || days.at(-1);
+        const items = day
+          ? await request(`/matchdays/${day.id}/matches`, { signal })
+          : [];
+        bundle = { selected_matchday: day, matches: items };
+      }
+      if (id !== viewId) return;
+      if (bundle.selected_matchday) {
+        matchdays = [bundle.selected_matchday];
+        selectedDay = bundle.selected_matchday.id;
+      } else selectedDay = "";
+      matches = bundle.matches;
+      homeTop = bundle.standings_top4 ?? null;
+    });
+    const daysTask = job("days", async () => {
+      const days = await request(`/competitions/${scope}/matchdays`, {
+        signal,
+        cacheMs: 30000,
+      });
+      await homeTask;
+      if (id === viewId) {
+        const selected = currentDay();
+        matchdays = days.map((d) =>
+          d.id === selected?.id ? { ...d, ...selected } : d,
+        );
+      }
+    });
+    const otherTasks = [
+      job("standings", async () => {
+        const value = await request(`/competitions/${scope}/standings`, {
+          signal,
+          cacheMs: 30000,
+        });
+        if (id === viewId) standings = value;
       }),
-      request(`/competitions/${competition}/standings`, {
-        signal: controller.signal,
+      job("facets", async () => {
+        const value = await request(`/players/facets?competition_id=${scope}`, {
+          signal,
+          cacheMs: 60000,
+        });
+        if (id === viewId) facets = value;
       }),
-      request(`/players/facets?competition_id=${competition}`, {
-        signal: controller.signal,
+      job("coaches", async () => {
+        const value = await request(`/coaches?competition_id=${scope}`, {
+          signal,
+          cacheMs: 30000,
+        });
+        if (id === viewId) coaches = value;
       }),
-      request(`/coaches?competition_id=${competition}`, {
-        signal: controller.signal,
-      }),
-    ]);
-    if (id !== viewId) return;
-    matchdays = days;
-    standings = table;
-    facets = options;
-    coaches = coachList;
-    selectedDay =
-      (days.find((d) => d.status === "UPCOMING") || days.at(-1))?.id || "";
-    matches = selectedDay
-      ? await request(`/matchdays/${selectedDay}/matches`, {
-          signal: controller.signal,
-        })
-      : [];
-    if (id !== viewId) return;
-    if (token && user) await loadServerTeam(id);
-    if (id !== viewId) return;
+    ];
     status = "ready";
     render();
     if (page === "players") loadCatalog();
+    const privateTask = job("team", async () => {
+      await daysTask;
+      if (id !== viewId) return;
+      try {
+        if (token && user) await loadServerTeam(id);
+      } finally {
+        if (id === viewId) teamLoading = false;
+      }
+    });
+    await Promise.all([homeTask, daysTask, privateTask, ...otherTasks]);
   } catch (e) {
     if (id !== viewId || e.name === "AbortError") return;
     status = "error";
@@ -373,7 +482,17 @@ async function loadCatalog() {
   const id = ++catalogVersion;
   catalogController?.abort();
   catalogController = new AbortController();
-  status = "catalog-loading";
+  const cachedPath = catalogQuery({
+    competition,
+    search: query,
+    position,
+    club,
+    sort,
+    offset,
+  });
+  const cached = mode === "api" ? peekCache(cachedPath) : null;
+  if (cached) catalog = cached;
+  status = cached ? "ready" : "catalog-loading";
   error = "";
   if (page === "players") {
     $("#catalog-result").innerHTML = catalogContent();
@@ -400,8 +519,8 @@ async function loadCatalog() {
         limit: 24,
         offset,
       };
-    } else
-      catalog = await request(
+    } else {
+      const result = await request(
         catalogQuery({
           competition,
           search: query,
@@ -410,8 +529,11 @@ async function loadCatalog() {
           sort,
           offset,
         }),
-        { signal: catalogController.signal },
+        { signal: catalogController.signal, cacheMs: 30000 },
       );
+      if (id !== catalogVersion) return;
+      catalog = result;
+    }
     if (id !== catalogVersion) return;
     status = "ready";
     if (page === "players") {
@@ -484,6 +606,10 @@ function pickSlot(index) {
   };
 }
 function buyModal(p) {
+  if (teamLoading || busy || (mode === "api" && dataStates.team !== "ready")) {
+    toast("Sačekaj učitavanje svog tima pre transfera.");
+    return;
+  }
   if (draft.roster.some((r) => r.id === p.id)) {
     detail(p.id);
     return;
@@ -494,6 +620,7 @@ function buyModal(p) {
   $("#transfer-form").onsubmit = async (e) => {
     e.preventDefault();
     const button = e.target.querySelector("button");
+    if (button.disabled) return;
     button.disabled = true;
     try {
       if (mode === "api" && serverTeam) {
@@ -582,6 +709,10 @@ function hydrateTeam(team, lineup = null) {
 async function loadServerTeam(version) {
   const list = await request("/teams/me", { token, signal: controller.signal });
   if (version !== viewId) return;
+  if (list.some((t) => !t.competition_id))
+    throw new Error(
+      "Backend treba uskladiti sa sačuvanim timovima. Tvoj nacrt nije prepisan.",
+    );
   const team = list.find((t) => t.competition_id === competition);
   if (!team) {
     serverTeam = null;
@@ -596,7 +727,28 @@ async function loadServerTeam(version) {
   if (version !== viewId) return;
   hydrateTeam(team, lineup);
 }
+async function saveConfirmedLineup(path, options) {
+  try {
+    return await request(path, options);
+  } catch (error) {
+    if (error.status && error.status !== 409 && error.status < 500) throw error;
+    try {
+      const saved = await request(path, { token: options.token });
+      const intended = options.body;
+      if (
+        saved.formation === intended.formation &&
+        saved.captain_id === intended.captain_id &&
+        JSON.stringify([...saved.active_player_ids].sort()) ===
+          JSON.stringify([...intended.active_player_ids].sort())
+      )
+        return saved;
+    } catch {}
+    throw error;
+  }
+}
 async function saveLineup() {
+  if (busy || teamLoading || (mode === "api" && dataStates.team !== "ready"))
+    return;
   const errors = [
     ...lineupErrors(draft.formation, draft.active, draft.roster, draft.captain),
     ...rosterErrors(draft.roster, draft.active),
@@ -646,7 +798,7 @@ async function saveLineup() {
             coach_id: draft.coach.id,
           },
         });
-      const saved = await request(
+      const saved = await saveConfirmedLineup(
         `/teams/${serverTeam.id}/lineup?matchday_id=${selectedDay}`,
         {
           method: "PUT",
@@ -680,6 +832,10 @@ async function saveLineup() {
   }
 }
 function coachModal() {
+  if (teamLoading || busy || (mode === "api" && dataStates.team !== "ready")) {
+    toast("Sačekaj učitavanje svog tima.");
+    return;
+  }
   if (mode === "demo") {
     modal("<h2>Stručni štab</h2><p>Demo trener je deo tima i budžeta.</p>");
     return;
@@ -690,11 +846,14 @@ function coachModal() {
   $$("[data-coach]").forEach(
     (b) =>
       (b.onclick = async () => {
+        if (busy) return;
         const c = coaches.find((c) => c.id === b.dataset.coach);
         if (budget() + (draft.coach?.current_cost || 0) < c.current_cost) {
           toast("Nema dovoljno kredita.");
           return;
         }
+        busy = true;
+        b.disabled = true;
         try {
           if (serverTeam) {
             const updated = await request(`/teams/${serverTeam.id}/transfers`, {
@@ -722,6 +881,9 @@ function coachModal() {
           toast("Trener izabran.");
         } catch (e) {
           toast(e.message);
+        } finally {
+          busy = false;
+          b.disabled = false;
         }
       }),
   );
@@ -732,6 +894,7 @@ function authModal(register = false) {
       `<h2>${esc(user.display_name)}</h2><p>${esc(user.email)}</p><button class="secondary" id="logout">Odjavi se</button>`,
     );
     $("#logout").onclick = () => {
+      clearPublicCache();
       token = null;
       user = null;
       serverTeam = null;

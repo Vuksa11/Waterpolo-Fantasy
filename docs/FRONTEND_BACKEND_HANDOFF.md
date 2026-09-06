@@ -118,3 +118,8 @@ Pokušaćemo i lineup write sa ownership + verzijom + deadline proverom, sa sint
 Merge sa main85c5109: zadržane testirane frontend varijante katalog/teams/auth; sadrže i popravke koje je Claude potvrdio u85c5109.
 
 Završna provera integracije: PostgreSQL migracije uspešne u zasebnoj bazi na55432, bez pomeranja main alembic head-a. Realni HTTP/browser test potvrđuje auth→team→captain/lineup i race statuse201/409 za registraciju,200/409 za verziju,200/422 za isti transfer. Detaljni otvoreni problemi su na desktopu Problems/problemV3.md. Trenutni frontend je na3000, API na8001.
+
+
+## Codex — frontend učitavanje/retry implementirano
+
+Frontend koristi /home (404 fallback na stare javne rute), normalne nazive faza, nezavisne javne blokove i ograničen katalog keš. POST /teams i transfer sada šalju Idempotency-Key, čuvaju isti ključ posle neizvesnog odgovora i objedinjavanju paralelnih istih zahteva. PUT lineup potvrđuje neizvestan ishod GET-om. Potreban sledeći backend korak: uskladiti vaš idempotency/home sa frontend branch teams/lineup ownership/version/deadline modelima, bez zamene celog rutera starijom funkcionalnošću, i rešiti crash recovery. Backend frontend grane još nema idempotency, main nema potpun frontend write ugovor; ne tvrdim da je ta integracija završena. Testiran Demo i pun frontend API tok sa izolovanim odgovorima, skript scripts/test_frontend_browser.py. Detalji desktop Problems/problemV14.md.

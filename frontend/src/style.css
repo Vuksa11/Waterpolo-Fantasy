@@ -2954,3 +2954,31 @@ footer {
     flex-wrap: wrap;
   }
 }
+
+.loading-cards {
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.loading-cards p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #24475f;
+}
+.loading-cards > div {
+  height: 74px;
+  border-radius: 12px;
+  background: linear-gradient(100deg, #ffffff65, #ffffffda, #ffffff65);
+}
+.round-number {
+  flex-wrap: wrap;
+  max-width: 42%;
+  font-size: clamp(24px, 3.5vw, 48px);
+}
+@media (max-width: 720px) {
+  .round-number {
+    max-width: 100%;
+    font-size: 29px;
+  }
+}

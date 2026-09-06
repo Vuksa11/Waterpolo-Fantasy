@@ -4,9 +4,9 @@ export class ApiError extends Error {
     this.status = status;
   }
 }
-export async function request(
+async function fetchRequest(
   path,
-  { signal, method = "GET", body, token } = {},
+  { signal, method = "GET", body, token, idempotencyKey } = {},
 ) {
   const controller = new AbortController(),
     timer = setTimeout(() => controller.abort(), 15000);
@@ -20,6 +20,7 @@ export async function request(
       credentials: "same-origin",
       headers: {
         Accept: "application/json",
+        ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
         ...(body ? { "Content-Type": "application/json" } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
@@ -38,6 +39,13 @@ export async function request(
       );
     }
     return data;
+  } catch (error) {
+    if (controller.signal.aborted && !signal?.aborted)
+      throw new ApiError(
+        "Server nije odgovorio na vreme. Pokušaj ponovo.",
+        408,
+      );
+    throw error;
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
@@ -65,4 +73,89 @@ export function catalogQuery({
   }))
     if (value) p.set(key, value);
   return "/players/catalog?" + p;
+}
+
+// Only public GET responses are cached. Private responses never enter this map.
+const publicCache = new Map();
+const writes = new Map();
+const pendingKeys = new Map();
+export function clearPublicCache() {
+  publicCache.clear();
+}
+export function peekCache(path) {
+  return publicCache.get(path)?.data;
+}
+export async function request(path, options = {}) {
+  const { method = "GET", token, cacheMs = 0 } = options;
+  const cacheable = method === "GET" && !token && cacheMs > 0;
+  const hit = publicCache.get(path);
+  if (cacheable && hit && Date.now() - hit.at < cacheMs) return hit.data;
+  const protectedWrite =
+    method === "POST" &&
+    (path === "/teams" || /^\/teams\/[^/]+\/transfers$/.test(path));
+  if (!protectedWrite) {
+    const data = await fetchRequest(path, options);
+    if (cacheable && !options.signal?.aborted) {
+      publicCache.delete(path);
+      publicCache.set(path, { data, at: Date.now() });
+      if (publicCache.size > 40)
+        publicCache.delete(publicCache.keys().next().value);
+    }
+    return data;
+  }
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(JSON.stringify([token, path, options.body])),
+  );
+  const storageKey =
+    "vrl-write-" +
+    [...new Uint8Array(digest)]
+      .map((x) => x.toString(16).padStart(2, "0"))
+      .join("");
+  if (writes.has(storageKey)) return writes.get(storageKey);
+  let key = pendingKeys.get(storageKey);
+  try {
+    key ||= sessionStorage.getItem(storageKey);
+  } catch {}
+  key ||= crypto.randomUUID();
+  pendingKeys.set(storageKey, key);
+  try {
+    sessionStorage.setItem(storageKey, key);
+  } catch {}
+  const task = fetchRequest(path, { ...options, idempotencyKey: key })
+    .then((data) => {
+      pendingKeys.delete(storageKey);
+      try {
+        sessionStorage.removeItem(storageKey);
+      } catch {}
+      clearPublicCache();
+      return data;
+    })
+    .catch((error) => {
+      // An uncertain result must reuse its key on the next user-initiated retry.
+      if (
+        error.status >= 400 &&
+        error.status < 500 &&
+        ![408, 409, 429].includes(error.status)
+      ) {
+        pendingKeys.delete(storageKey);
+        try {
+          sessionStorage.removeItem(storageKey);
+        } catch {}
+      }
+      if (
+        error.status === 409 &&
+        /progress|claim.*attempt/i.test(error.message)
+      ) {
+        error.message =
+          "Prethodni zahtev se još obrađuje. Sačekaj pa ponovi istu radnju.";
+      } else if (!error.status || error.status === 408 || error.status >= 500) {
+        error.message =
+          "Ishod zahteva nije potvrđen. Ponovi istu radnju da proveriš rezultat.";
+      }
+      throw error;
+    })
+    .finally(() => writes.delete(storageKey));
+  writes.set(storageKey, task);
+  return task;
 }
