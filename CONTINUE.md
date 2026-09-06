@@ -308,14 +308,39 @@ lock across the whole handler -- catch the IntegrityError and re-read,
 similar to the idempotency claim pattern. Left as an open discussion point,
 not an unrequested rewrite of their code.
 
-**Conclusion**: the "instant" feel for read-heavy traffic is already
-achieved up to 300 concurrent without Redis. Not starting Phase 2 (Redis)
-until there's an actual reason to -- current indexes/pool tuning are
-sufficient for reads. `create_team` write contention stays open for
-discussion, not an urgent fix. Raw CSVs in `backend/loadtest/results/`.
-Reverted the server back to a normal single-worker process after
-measuring -- the 4-worker run was only for this test, not a deployment
-change.
+**Then pushed to the actual target -- 1000 concurrent, read-only, 1
+worker**: this is where the real ceiling shows up. Aggregate p95 jumps to
+**8000ms**, p99 to **13000ms**, max 30000ms, and two real `500`s appear --
+confirmed in the log, not guessed: `sqlalchemy.exc.TimeoutError: QueuePool
+limit of size 20 overflow 20 reached, connection timed out, timeout 30.00`.
+The single process's 40-connection DB pool saturates completely under 1000
+concurrent requests; the rest queue and some time out after 30s.
+
+**Tried the same with 4 uvicorn workers** (`DB_POOL_SIZE=15`/
+`DB_MAX_OVERFLOW=5` each, 80 total, under Postgres's `max_connections=100`):
+**0% failures**, throughput 210->358 req/s, p95 8000ms->**1600ms**, p99
+13000ms->**2300ms**, max 30000ms->4500ms. A big improvement, and proof Phase
+3 (more workers) actually matters at this load level -- unlike the write
+contention above, more workers/more DB connections directly help here since
+there's no row-lock serialization involved.
+
+**Revising my earlier conclusion** (from the 300-concurrent result) that
+Redis wasn't needed -- that was true AT 300 concurrent, but not sufficient
+for the actual ~1000-concurrent target: even with 4 workers, p95=1.6s/
+p99=2.3s at 1000 users isn't an "instant" feel. Redis (Phase 2) would likely
+help here precisely by cutting the number of queries that have to wait on
+the DB pool at all -- standings/catalog/home change rarely (only after a
+scraper run), so a short-TTL cache is safe there, freeing pool capacity for
+whatever actually needs to hit the DB.
+
+**Conclusion (revised)**: up to 300 concurrent, reads already scale fine
+with nothing extra. For the actual ~1000-concurrent target, BOTH Phase 3
+(more workers -- proven to help significantly) AND Phase 2 (Redis -- not
+implemented yet, but the finding above is the first concrete evidence it's
+actually needed, not just nice-to-have) are required. `create_team` write
+contention stays open for discussion. Raw CSVs (including the 1000-
+concurrent runs, 1 and 4 workers) in `backend/loadtest/results/`. Server
+reverted to normal single-worker mode after measuring.
 
 ## Blocked on the user
 
