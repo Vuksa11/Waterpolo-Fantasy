@@ -168,7 +168,26 @@ scraped, not synthetic):
   point that manual/scratch-script checks aren't a substitute -- covers the
   normal-transfer, invalid-transfer-releases-claim, concurrent-race, and
   cancellation scenarios. Process-crash recovery (kill -9) remains an
-  explicitly open gap, not solved by this or any exception handler.
+  explicitly open gap, not solved by this or any exception handler. (5)
+  problemV11: reviewed the new tests themselves and found two real P2s --
+  `test_concurrent_same_key_transfer_serializes` asserted an exact
+  [200,409] split, which assumes a specific scheduling outcome between two
+  genuine concurrent asyncpg round-trips rather than a guaranteed one
+  ([200,200] is equally valid if the loser's re-check lands after the
+  winner already fulfilled); and `roster_fixture` picked "the first
+  competition" without checking its cheapest roster actually fits the
+  100-credit budget. Both confirmed by reasoning through the actual code
+  paths before fixing. Fixed: the concurrent test now accepts either
+  status split and checks the real invariant instead (byte-identical
+  replay bodies, exact SELL/BUY entity+price in the DB, correct
+  credit_balance math, unchanged history count after a retry);
+  `roster_fixture` now scans every competition for one with an affordable
+  full roster instead of assuming the first one works. All 4 tests still
+  pass repeatably. Also flagged (correctly, no code change needed) that
+  cancellation exactly during the idempotency claim's own commit -- before
+  the caller's try block even starts -- is the same class of unrecoverable
+  gap as a process crash, not a new one; the same background sweep/lease
+  fix already tracked as open would cover both.
 
 ## Blocked on the user
 

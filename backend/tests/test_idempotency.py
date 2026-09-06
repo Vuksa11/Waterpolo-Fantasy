@@ -60,32 +60,57 @@ async def client():
         yield ac
 
 
+BUDGET = 100.0  # kept in sync with app.routers.teams.BUDGET -- checked at import time below
+assert BUDGET == __import__("app.routers.teams", fromlist=["BUDGET"]).BUDGET
+
+
 @pytest_asyncio.fixture
 async def roster_fixture(db_session):
-    """Reuses real scraped data (any competition with >=11 players + 1 coach)."""
-    competition = await db_session.scalar(select(Competition).limit(1))
-    if competition is None:
+    """
+    Reuses real scraped data rather than synthetic fixtures (consistent with
+    how every other check in this project has been verified against the real
+    dev DB). But picking blindly "the first competition" (problemV11) doesn't
+    guarantee an affordable roster -- a competition's cheapest 11 players +
+    cheapest coach could exceed BUDGET depending on the current price data.
+    So this scans every competition and picks the first one that actually has
+    a full, affordable, distinct roster, and skips only if NONE of them do.
+    """
+    competitions = list((await db_session.scalars(select(Competition))).all())
+    if not competitions:
         pytest.skip("no scraped competition in dev DB -- run the scraper first")
 
-    players = list(
-        (
-            await db_session.scalars(
-                select(Player).where(Player.competition_id == competition.id).order_by(Player.current_cost.asc()).limit(11)
-            )
-        ).all()
-    )
-    coach = await db_session.scalar(select(Coach).where(Coach.competition_id == competition.id))
-    if len(players) < 11 or coach is None:
-        pytest.skip("dev DB doesn't have enough players/coaches for a full roster yet")
-
-    extra_player = await db_session.scalar(
-        select(Player).where(
-            Player.competition_id == competition.id,
-            Player.id.notin_([p.id for p in players]),
+    for competition in competitions:
+        players = list(
+            (
+                await db_session.scalars(
+                    select(Player)
+                    .where(Player.competition_id == competition.id)
+                    .order_by(Player.current_cost.asc(), Player.id.asc())
+                    .limit(11)
+                )
+            ).all()
         )
-    )
-    if extra_player is None:
-        pytest.skip("dev DB has no spare player to transfer in")
+        coach = await db_session.scalar(
+            select(Coach).where(Coach.competition_id == competition.id).order_by(Coach.current_cost.asc())
+        )
+        if len(players) < 11 or coach is None:
+            continue
+
+        extra_player = await db_session.scalar(
+            select(Player)
+            .where(Player.competition_id == competition.id, Player.id.notin_([p.id for p in players]))
+            .order_by(Player.current_cost.asc(), Player.id.asc())
+        )
+        if extra_player is None:
+            continue
+
+        roster_cost = sum(float(p.current_cost) for p in players) + float(coach.current_cost)
+        if roster_cost > BUDGET:
+            continue
+
+        break
+    else:
+        pytest.skip("no competition in dev DB currently has an affordable 11-player + coach roster")
 
     email = f"idempotency-test-{uuid.uuid4()}@example.com"
     user = User(email=email, password_hash="x", display_name="Idempotency Test")
@@ -99,6 +124,7 @@ async def roster_fixture(db_session):
         "extra_player": extra_player,
         "coach": coach,
         "user_id": user.id,
+        "starting_balance": BUDGET - roster_cost,
     }
 
     # Cleanup: delete anything this test created, in FK-safe order.
@@ -193,12 +219,30 @@ async def test_invalid_transfer_releases_idempotency_claim(client, roster_fixtur
 
 
 async def test_concurrent_same_key_transfer_serializes(client, roster_fixture, db_session):
+    """
+    problemV11 correctly pointed out the original version of this test
+    asserted an exact [200, 409] split, which assumes the loser's re-check
+    always lands while the winner's transaction is still "pending" -- that's
+    likely given the winner needs several more DB round-trips first, but it's
+    a real race between two genuine concurrent DB round-trips (asyncpg over
+    the network), not a guaranteed ordering. [200, 200] (both see the final
+    replayed result) is an equally valid outcome and must not fail the test.
+    The actual invariant that must hold regardless of which interleaving
+    happens: exactly one real transfer occurs, both 200 responses (if there
+    are two) are byte-identical replays of it, and a same-key retry afterward
+    doesn't create a second one.
+    """
     token, resp = await _create_team(client, roster_fixture)
     assert resp.status_code == 201, resp.text
     team = resp.json()
+    starting_balance = roster_fixture["starting_balance"]
 
-    drop_id = str(roster_fixture["players"][0].id)
-    add_id = str(roster_fixture["extra_player"].id)
+    drop_player = roster_fixture["players"][0]
+    add_player = roster_fixture["extra_player"]
+    drop_id = str(drop_player.id)
+    add_id = str(add_player.id)
+    sell_price = float(drop_player.current_cost)
+    buy_price = float(add_player.current_cost)
     key = f"race-{uuid.uuid4()}"
 
     async def fire():
@@ -215,17 +259,47 @@ async def test_concurrent_same_key_transfer_serializes(client, roster_fixture, d
 
     r1, r2 = await asyncio.gather(fire(), fire())
     statuses = sorted([r1.status_code, r2.status_code])
-    assert statuses == [200, 409], (r1.status_code, r1.text, r2.status_code, r2.text)
+    assert statuses in ([200, 409], [200, 200]), (r1.status_code, r1.text, r2.status_code, r2.text)
 
-    from db.models import TransferHistoryEntry
+    successes = [r for r in (r1, r2) if r.status_code == 200]
+    assert len(successes) >= 1, "at least one of the two concurrent requests must actually succeed"
+    if len(successes) == 2:
+        assert successes[0].json() == successes[1].json(), "two 200s must be identical replays, not two real transfers"
+
+    expected_balance = round(starting_balance + sell_price - buy_price, 2)
+    body = successes[0].json()
+    assert body["credit_balance"] == pytest.approx(expected_balance, abs=0.01), body
+    roster_entity_ids = {r["entity_id"] for r in body["roster"]}
+    assert add_id in roster_entity_ids and drop_id not in roster_entity_ids, body["roster"]
+
+    from db.models import FantasyTeam, TransferAction, TransferHistoryEntry
 
     entries = (
-        await db_session.scalars(select(TransferHistoryEntry).where(TransferHistoryEntry.fantasy_team_id == team["id"]))
+        await db_session.scalars(
+            select(TransferHistoryEntry)
+            .where(TransferHistoryEntry.fantasy_team_id == team["id"])
+            .order_by(TransferHistoryEntry.action)
+        )
     ).all()
     assert len(entries) == 2, "expected exactly one SELL + one BUY, found duplicates"
+    by_action = {e.action: e for e in entries}
+    assert set(by_action) == {TransferAction.SELL, TransferAction.BUY}
+    assert by_action[TransferAction.SELL].entity_id == drop_player.id
+    assert float(by_action[TransferAction.SELL].price) == pytest.approx(sell_price, abs=0.01)
+    assert by_action[TransferAction.BUY].entity_id == add_player.id
+    assert float(by_action[TransferAction.BUY].price) == pytest.approx(buy_price, abs=0.01)
+
+    db_team = await db_session.get(FantasyTeam, uuid.UUID(team["id"]))
+    assert float(db_team.credit_balance) == pytest.approx(expected_balance, abs=0.01)
 
     retry = await fire()
     assert retry.status_code == 200, retry.text
+    assert retry.json() == successes[0].json(), "retry after settling must replay the exact same result"
+
+    entries_after_retry = (
+        await db_session.scalars(select(TransferHistoryEntry).where(TransferHistoryEntry.fantasy_team_id == team["id"]))
+    ).all()
+    assert len(entries_after_retry) == 2, "retry must not create additional history rows"
 
 
 async def test_cancelled_task_still_releases_claim():

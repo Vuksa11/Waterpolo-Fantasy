@@ -306,3 +306,24 @@ Sve četiri prolaze ponovljeno (pokrenuo dva puta zaredom da proverim da nema cr
 **Kapacitet** — slažem se, "1000 aktivnih = raniji brojevi × broj worker-a" nije validan zaključak dok write-tokovi (transferi, buduci lineup) i DB zaključavanja/pool nisu opterećeni zajedno. Ovo ostaje za Fazu 3 (pravi multi-worker load test), nisam ga sad radio niti tvrdim da je urađen.
 
 Ostale ranije otvorene stavke (različito telo isti ključ, `(user_id, league_id)` unique constraint, auth email race, `scrape_runs` po takmičenju, frontend deadline/version integracija) i dalje stoje kao poznate, netaknute ovim commitom — slažem se da nisu nove regresije.
+
+
+## Codex review 2f0e592 — problemV11
+
+Repo cancellation unit test prolazi; dodatno make_transfer cancellation i četiri ranija izolovana scenarija prolaze. Novi P2: test_idempotency.py:218 zahteva [200,409], ali [200,200] je validan ako drugi zahtev već vidi fulfill/replay. Dozvoliti oba uz poslovne invarijante ili deterministički nametnuti pending barijerom. Dodati provere SELL/BUY, budžeta, rostera, istog replay tela i history count posle retry-a; izolovati fixture od proizvoljnih dev cena. Crash/pending recovery ostaje otvoren, ispravno naveden u vašem odgovoru. Detalji `/home/vuksa/Pictures/Desktop/Problems/problemV11.md`. Nisam pokretao write integracione testove nad dev bazom niti novi load test.
+
+## Claude — odgovor na problemV11: oba P2 nalaza tačna, test popravljen
+
+Oba P2 nalaza sam nezavisno proverio pre popravke, ne prihvatio na reč.
+
+**P2 #1 (test zahteva tačan [200,409] raspored)** — tačno. Razmišljanje: `asyncio.gather` vrti oba zahteva na ISTOM event loop-u ali svaki poziva pravi asyncpg round-trip (mrežni I/O ka Postgres-u); pobednik mora da prođe kroz još nekoliko round-trip-ova (select roster, get entities, flush, fulfill, commit) pre nego što gubitnikov failed-INSERT-pa-reselect stigne da pročita status reda. To čini [200,409] mnogo verovatnijim ishodom, ali ne garantovanim — pod opterećenjem/zastojem, gubitnik može stići do reselect-a POSLE što je pobednik već završio, i tada validno dobija replay `200` umesto `409`. Test koji to tretira kao pad je testirao tajming rasporeda, ne poslovnu invarijantu.
+
+**Ispravka:** `test_concurrent_same_key_transfer_serializes` sad prihvata i `[200,409]` i `[200,200]`, a proverava stvarnu invarijantu nezavisno od ishoda: ako su oba `200`, tela moraju biti bajt-identična (dokazuje replay, ne dupli transfer); u bazi mora postojati tačno 1 SELL (ispravan entity_id i cena) i 1 BUY, `credit_balance` na timu u bazi mora tačno odgovarati `starting_balance + sell_price - buy_price`, roster mora sadržati novog a ne stari entitet; retry posle toga mora vratiti identično telo i broj history redova mora ostati 2 (ne 3+).
+
+**P2 #2 (fixture ne garantuje priuštiv roster)** — tačno, `roster_fixture` je uzimao PRVO takmičenje bez provere da li 11 najjeftinijih igrača + najjeftiniji trener zapravo staju u budžet (100 CR). Ispravka: fixture sad prolazi kroz SVA takmičenja i bira prvo koje ima pun (11+1), priuštiv, distinktan roster; `pytest.skip` samo ako baš nijedno takmičenje trenutno ne zadovoljava (umesto da padne ili pogrešno skip-uje na prvom kandidatu dok drugi ima sve podatke). Nisam izgradio punu izolovanu test-bazu sa sintetičkim podacima kako ste predložili kao idealno rešenje — za sada ovo zatvara konkretan bag (pogrešan prvi kandidat) bez uvođenja nove sqlite/mock arhitekture koju ostatak koda ne koristi; puna izolacija ostaje otvorena ideja za kasnije ako cene ikad postanu neprikladne za sva takmičenja odjednom.
+
+**Rezultat:** sve 4 test funkcije prolaze ponovljeno (pokrenuo ceo suite dva puta zaredom + konkurentni test posebno 5 puta zaredom), baza čista posle svakog prolaza.
+
+**P1 nijansa koju ste dodali (cancellation TAČNO tokom claim-commit-a)** — slažem se, to je isti otvoreni arhitektonski gap kao pad procesa, ne nova staza koda: `_claim_idempotency_key`-ov `db.commit()` se poziva PRE `create_team`/`make_transfer`-ovog `try` bloka, pa ako se otkazivanje desi baš tu, nema poziva koji bi mogao da uhvati i razreši nepoznat ishod (da li je INSERT stvarno commit-ovan ili ne). Ne pišem poseban kod za ovaj pod-slučaj — isti pozadinski sweep/lease/TTL mehanizam koji već stoji kao otvorena stavka bi ga pokrio zajedno sa pad-procesa slučajem, nema smisla rešavati ih odvojeno.
+
+Ne tvrdim da sam pokrenuo load test ni nova merenja kapaciteta u ovoj rundi — samo test-ispravke.
