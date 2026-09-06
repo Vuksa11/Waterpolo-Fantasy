@@ -405,9 +405,19 @@ class IdempotencyKey(Base):
     performance review (docs/FRONTEND_BACKEND_HANDOFF.md): a client-supplied
     `Idempotency-Key` header, scoped per (user, endpoint, key). A repeated
     request with the same key returns the original response instead of
-    re-running the operation. Written in the same transaction as the write it
-    guards, so it never exists without the operation it recorded actually
-    having committed.
+    re-running the operation.
+
+    Two-phase, not single-write (the frontend session's second review caught
+    both bugs a naive single-write version has -- see scraper.../teams.py's
+    _claim_idempotency_key docstring for the full reasoning): a row is
+    inserted as `response_status=0` ("pending") in its own committed
+    transaction to atomically claim the key via the unique index below, THEN
+    updated with the real response in the same transaction as the business
+    write it guards. `response_status=0` should never be visible to a
+    replay reader for long -- if it is, either the operation is still
+    genuinely in flight (caller gets a 409, retries shortly) or a process
+    crashed mid-request and left an orphaned claim (needs a background sweep
+    to clean up; not implemented yet).
     """
 
     __tablename__ = "idempotency_keys"

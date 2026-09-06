@@ -18,7 +18,9 @@ async def list_competitions(db: AsyncSession = Depends(get_db)) -> list[Competit
 
 
 @router.get("/{competition_id}/standings", response_model=list[StandingsRow])
-async def get_standings(competition_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> list[StandingsRow]:
+async def get_standings(
+    competition_id: uuid.UUID, db: AsyncSession = Depends(get_db), season_id: uuid.UUID | None = None
+) -> list[StandingsRow]:
     """
     Computed from finished matches -- there's no standings table (the
     platform doesn't need one; this is just for viewing the scraped data).
@@ -26,13 +28,23 @@ async def get_standings(competition_id: uuid.UUID, db: AsyncSession = Depends(ge
     points). Water polo rarely ends level (ties go to a penalty shootout,
     tracked separately as `psoscore` on the source site) but a genuine tie
     score isn't specially handled here -- see module TODO if one shows up.
+
+    `season_id` is optional and defaults to every season for this
+    competition (today that's the same thing -- only one season exists per
+    competition). It exists so a caller that already picked a specific
+    season (see home.py, which caught a real bug here: it was picking a
+    matchday from one season while this endpoint silently summed matches
+    across all of them) can keep the two consistent.
     """
-    result = await db.execute(
+    query = (
         select(Match)
         .join(Matchday, Matchday.id == Match.matchday_id)
         .join(Season, Season.id == Matchday.season_id)
         .where(Season.competition_id == competition_id, Match.status == MatchStatus.FINISHED)
     )
+    if season_id is not None:
+        query = query.where(Season.id == season_id)
+    result = await db.execute(query)
     matches = result.scalars().all()
     if not matches:
         return []

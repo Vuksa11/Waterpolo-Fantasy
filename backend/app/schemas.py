@@ -233,4 +233,7 @@ class HomeOut(BaseModel):
     selected_matchday: MatchdaySummary | None
     matches: list[MatchOut]
     standings_top4: list[StandingsRow]
-    updated_at: datetime
+    # None means "no successful scrape on record" -- genuinely unknown
+    # freshness, not "just updated". See home.py for why this must not
+    # default to the current time.
+    updated_at: datetime | None

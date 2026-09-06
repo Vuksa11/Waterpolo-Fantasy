@@ -26,11 +26,21 @@ _PRIVATE_PREFIXES = ("/api/auth", "/api/teams")
 class CacheControlMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
-        if request.method != "GET" or "Cache-Control" in response.headers:
+        if "Cache-Control" in response.headers:
             return response
+        # Checked before the GET-only branch below on purpose: the frontend
+        # session's review caught a version of this that returned early for
+        # any non-GET method first, so POST /api/auth/login and
+        # POST /api/teams/... -- most of what those routers actually do --
+        # got no Cache-Control header at all instead of the intended
+        # `private, no-store`.
         if request.url.path.startswith(_PRIVATE_PREFIXES):
             response.headers["Cache-Control"] = "private, no-store"
-        elif request.url.path.startswith(_CACHEABLE_PREFIXES) and response.status_code == 200:
+        elif (
+            request.method == "GET"
+            and request.url.path.startswith(_CACHEABLE_PREFIXES)
+            and response.status_code == 200
+        ):
             response.headers["Cache-Control"] = f"public, max-age={settings.cache_control_max_age_seconds}"
         return response
 
