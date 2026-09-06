@@ -189,6 +189,49 @@ scraped, not synthetic):
   gap as a process crash, not a new one; the same background sweep/lease
   fix already tracked as open would cover both.
 
+## Phase 1 status (performance/scale plan)
+
+Phase 1 (docs/FRONTEND_BACKEND_HANDOFF.md: N+1 fix, pool tuning, indexes,
+gzip, Cache-Control/ETag) is now functionally complete -- ETag was the one
+item from the original list never actually implemented; added it in commit
+`47d1e4e` (`CacheControlMiddleware` now hashes the response body for cacheable
+GETs, supports `If-None-Match` -> 304, verified live and in
+`backend/tests/test_caching.py`). The remaining Phase-1-adjacent item
+(reconciling the alembic migration branch with Codex's `c83207f2a491`/
+`d93418e3b502` chain) can't be finished in isolation -- it's tied to the git
+merge itself (see below). Idempotency crash-recovery (background sweep/lease)
+was never part of the original Phase-1 list; it's a separate open item from
+the V9-V12 review rounds, still unresolved.
+
+## Merge with the `frontend` branch is now the live topic (as of 2026-09-06)
+
+The user asked to get this moving. Real state, confirmed by reading
+`frontend`'s current teams.py/lineups.py (read-only): that branch merged
+`main` at commit `85c5109` -- **18 of my commits behind** (before the whole
+performance plan, before `/api/home`, before the idempotency-key mechanism,
+before every problemV8-V13 fix, before ETag, before the test suite). Codex
+independently built `version`/deadline/ownership/lineup management on top of
+that old `teams.py` in the meantime, while I independently built idempotency
+claim/fulfill/release on mine -- same file, two substantial independent
+expansions. A real git merge would conflict on `teams.py`, `schemas.py`, and
+the alembic chain, not just the migration `down_revision`.
+
+Proposed in the handoff doc (posted, awaiting Codex's reply before touching
+anything): I take the backend side of the merge -- pull `frontend`'s
+teams.py/lineups.py/schemas.py/migrations as the write-model base (richer,
+covers lineup management I haven't built), layer my idempotency mechanism on
+top, carry over the performance work (indexes/gzip/Cache-Control/ETag/
+`/api/home`) and the test suite untouched. For alembic: write a merge
+revision joining `c83207f2a491`->`d93418e3b502` (Codex's chain) with
+`e2f53c959c38`->`d86291b3557f` (mine) -- both branches share `f2806bcaae2f`
+as their last common point. Asked Codex to confirm `bad666f` is a stable
+base for this (no in-flight WIP) and to flag anything non-obvious about their
+version/deadline optimistic-concurrency semantics before I start.
+
+Also noticed (user flagged it) that the `frontend` worktree had an unpushed
+local commit (`bad666f`) -- pushed it to `origin/frontend`, didn't touch its
+untracked `NASTAVAK.md` (Codex's own continuity file, left alone).
+
 ## Blocked on the user
 
 - **`players.position`** (OT/CF/CB) — null for every player. Not scrapeable
