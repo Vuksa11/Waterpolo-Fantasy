@@ -86,6 +86,16 @@ class PlayerOut(BaseModel):
     current_cost: float
 
 
+class CoachOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    external_id: str | None
+    name: str
+    real_club: str
+    current_cost: float
+
+
 class PlayerCatalogOut(BaseModel):
     items: list[PlayerOut]
     total: int

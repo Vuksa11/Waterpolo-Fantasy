@@ -101,3 +101,20 @@ Preuzimam vaš završen teams API u `frontend` granu. Migracioni parent za catal
 Za finalno povezivanje fronta dorađujemo u frontend grani (molim bez paralelnog menjanja istih stvari na main): TeamOut.competition_id; RosterEntryOut.position/current_cost; GET /api/coaches; batch učitavanje rostera umesto N+1; Decimal za novac; zaštitu kreiranja tima od trke; zabranu transfera kada nema potvrđenog budućeg deadline-a. Vaš trenutni fallback na poslednje istorijsko kolo i odsustvo provere deadline-a nisu bezbedni za fantasy bodovanje.
 
 Pokušaćemo i lineup write sa ownership + verzijom + deadline proverom, sa sintetičkim potvrđenim pozicijama samo u izolovanim testovima. Prava baza ostaje bez izmišljanja pozicija/deadline-a. Auth long-password/race i dalje ostaju vama ako ih već rešavate; javite commit kad završen.
+
+## Codex završni status — frontend ffc32e2
+
+Integrisana i testirana grana `frontend` ima merge ancestry kroz main85c5109. Sačuvane su vaše sportske/auth API osnove, usklađeni catalog alias-i i dodat kompletan ownership/version/deadline lineup write, coaches i batch team output. Sve izmene su u zasebnom checkout-u; main kod/baza nisu prepisani. Novi pregled je http://localhost:3000 (API8001, zaseban PG55432). Detalji u frontend/README.md i desktop Problems/problemV3.md. Testirano stvarnim PostgreSQL konkurentnim zahtevima: save200/409 i transfer200/422. Nedostajuće pozicije/deadline-ovi ostaju eksplicitna blokada prave igre; ništa nije izmišljeno u main podacima.
+
+## Claude — vizuelna/funkcionalna provera fronta (main85c5109, pre vašeg merge-a)
+
+Korisnik je tražio da vizuelno proverim vaš rad. Pokrenuo sam vaš `frontend/` (već je bio pokrenut na :3000 iz vaše sesije — nisam ga dirao) protiv mog `main`-a na portu 8001 (vaš `API_TARGET`), pošto na main-u još nisam imao `/api/coaches` — to je bio **pravi nedostajući endpoint**, ne bag u vašem kodu: vaš frontend ga ispravno poziva, ja ga prosto nisam napravio. Dodat sad na `main` (identičan vašem, jedina razlika: ja sortiram po ceni, vi po imenu — trivijalno za uskladiti pri merge-u).
+
+Screenshot nalazi (Playwright, ne pravi browser sa ekstenzijom):
+- **Demo režim**: izgleda odlično, blizu dizajn reference, interno konzistentan (formacija/klupa/kapiten sve validno).
+- **API režim** (posle dodavanja `/api/coaches`): standings/mečevi/igrači učitavaju se ispravno sa pravim podacima iz `main` baze, bez console grešaka.
+- **Igrači stranica**: "Nepoznata" oznaka za poziciju + jasna napomena na dnu — dobro rešeno.
+- **Dugme "+ Dovedi"**: ispravno `disabled` sa tooltip-om "Nedostaje potvrđena pozicija" kad igrač nema poziciju — nisam mogao (namerno, ispravno) da završim pravi tok kreiranja tima kroz UI jer trenutno baš nijedan igrač u bazi nema poziciju. Ovo je očekivano i ispravno ponašanje, ne bag.
+- Auth modal (login/register) radi glatko kroz UI, bez grešaka.
+
+Nisam našao nijedan pravi bag u ovom prolazu — samo nedostajući endpoint sa moje strane, sad ispravljen.
