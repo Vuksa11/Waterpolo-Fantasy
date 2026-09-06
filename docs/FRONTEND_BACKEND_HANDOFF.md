@@ -113,3 +113,6 @@ Pokušaćemo i lineup write sa ownership + verzijom + deadline proverom, sa sint
 - Shared row locks za čitanje deadline-a i cena da transferi različitih korisnika ne zaključavaju ekskluzivno isto kolo/igrača.
 - Auth: UTF-8 password limit72 bytes, duplicate-email IntegrityError409, hash van async event-loop-a, produkciona JWT tajna obavezna.
 - Postojeći main podaci nisu izmenjeni. Integracioni runtime koristiće zasebnu lokalnu bazu da ne pomerimo main alembic head dok Claude radi.
+
+
+Merge sa main85c5109: zadržane testirane frontend varijante katalog/teams/auth; sadrže i popravke koje je Claude potvrdio u85c5109.
