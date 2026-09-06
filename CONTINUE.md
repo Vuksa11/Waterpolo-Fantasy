@@ -74,7 +74,7 @@ otherwise) and actually run it (Playwright screenshot or similar) rather than
 just reading source, per how the last check-in found a real missing endpoint
 (`/api/coaches`) that a pure code read hadn't caught.
 
-## Current status (as of commit `cdad065`)
+## Current status (as of commit `5f03cac`)
 
 Verified against the real database (352 players, 132 matches, all live-
 scraped, not synthetic):
@@ -97,6 +97,19 @@ scraped, not synthetic):
   API shape for this — `PUT /api/teams/{id}/lineup`, optimistic concurrency
   via a `version` field, deadline-based locking — worth adopting rather than
   re-designing when this gets built.
+- **Performance/scale plan** (target: ~1000 concurrent of ~10k total
+  registered users, "instant"-feeling pages) — a joint plan negotiated with
+  Codex via the handoff doc, Phase 1 done: DB pool tuning (unmeasured
+  default guess, not a proven fix — a real load test is still owed before
+  claiming the target is met), fixed an N+1 roster query, added indexes on
+  every FK/lookup column actually queried (18 total, `CONCURRENTLY`), gzip +
+  `Cache-Control` (public on read-only sports data, explicit `private,
+  no-store` on auth/teams), a `GET /api/home` bundle endpoint (avoids a
+  4-5-request waterfall on the landing page, exact contract negotiated with
+  Codex), and `Idempotency-Key` support on team creation/transfers (a client
+  retry after a timeout replays the original response instead of risking a
+  duplicate). Redis caching and the actual load test (k6/locust) are next,
+  by mutual agreement, only once there's something to measure against.
 
 ## Blocked on the user
 
