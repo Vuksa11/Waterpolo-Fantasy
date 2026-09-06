@@ -1,4 +1,6 @@
 import hashlib
+import logging
+import time
 
 from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -6,7 +8,11 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import Response
 
 from app.core.config import settings
+from app.core.logging_config import configure_logging
 from app.routers import auth, coaches, competitions, home, lineups, matchdays, matches, players, teams
+
+configure_logging()  # before anything else logs -- see app/core/logging_config.py
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Waterpolo Fantasy API")
 
@@ -82,8 +88,43 @@ async def _add_etag_and_maybe_304(request: Request, response: Response) -> Respo
     return new_response
 
 
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """
+    Item #6 of an independent review's (Fable) priority list: before this,
+    the only visibility into a running process was uvicorn's own access log
+    (present but not leveled/structured) and whatever an unhandled
+    exception happened to print. This gives every request a single leveled
+    log line (INFO normally, WARNING on a 5xx) with method/path/status/
+    duration -- cheap, and enough to notice "requests are suddenly slow" or
+    "this route just started 500ing" from the process's own stdout, without
+    a real APM tool wired up (none is -- no Sentry/Datadog credentials
+    exist for this project).
+
+    Registered LAST (outermost in the stack -- Starlette runs the
+    last-added middleware first for the request, last for the response) so
+    the measured duration includes time spent in every other middleware
+    below it (Cache-Control/ETag, gzip), not just the route handler.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        start = time.monotonic()
+        try:
+            response = await call_next(request)
+        except Exception:
+            duration_ms = (time.monotonic() - start) * 1000
+            logger.exception("%s %s -> unhandled exception (%.1fms)", request.method, request.url.path, duration_ms)
+            raise
+        duration_ms = (time.monotonic() - start) * 1000
+        level = logging.WARNING if response.status_code >= 500 else logging.INFO
+        logger.log(
+            level, "%s %s -> %d (%.1fms)", request.method, request.url.path, response.status_code, duration_ms
+        )
+        return response
+
+
 app.add_middleware(CacheControlMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=500)
+app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(auth.router)
 app.include_router(coaches.router)
