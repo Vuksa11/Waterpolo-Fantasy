@@ -24,6 +24,19 @@ class Settings(BaseSettings):
     # nothing in correctness but saves a real DB round-trip on repeat views.
     cache_control_max_age_seconds: int = 30
 
+    # Phase 2 of the performance plan. None (default) means "no server-side
+    # cache" -- reads always hit Postgres, same as before this existed.
+    # Deliberately NOT required: a 1000-concurrent-read load test (see
+    # docs/FRONTEND_BACKEND_HANDOFF.md) confirmed a single process's DB pool
+    # saturates and times out at that load even with multiple workers
+    # helping some, so this closes the remaining gap -- but Redis being
+    # down must never take the API down with it (see app/core/cache.py).
+    redis_url: str | None = None
+    # Same freshness window as Cache-Control by default -- these are the
+    # same "only changes after a scraper run" endpoints, no reason for two
+    # different staleness windows to reason about.
+    redis_cache_ttl_seconds: int = 30
+
     # Dev-only default -- MUST be overridden via .env (JWT_SECRET=...) before
     # any real deployment. Anyone with this value can forge valid tokens.
     jwt_secret: str = "dev-insecure-secret-change-in-production"

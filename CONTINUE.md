@@ -342,6 +342,53 @@ contention stays open for discussion. Raw CSVs (including the 1000-
 concurrent runs, 1 and 4 workers) in `backend/loadtest/results/`. Server
 reverted to normal single-worker mode after measuring.
 
+## Phase 2 (Redis cache) implemented, blocked only on installing the server
+
+Went straight from finding "Redis would likely help" to building it, same
+session. `redis-server` itself isn't installed (needs `sudo`, see "Blocked
+on the user" below) so the real 1000-concurrent perf win can't be measured
+live yet -- but the application-side code is done, tested, and safe to ship
+as-is (it's inert until `REDIS_URL` is set).
+
+- `app/core/config.py`: `redis_url: str | None = None` (unset = cache
+  disabled, zero behavior change) and `redis_cache_ttl_seconds: int = 30`
+  (matches the existing Cache-Control window -- one staleness budget to
+  reason about, not two).
+- `app/core/cache.py`: `get_or_compute_json(key, compute, ttl)` -- the one
+  function routes call. Every failure mode (Redis absent, Redis
+  unreachable, a GET/SET erroring mid-request) degrades to "run compute()
+  against Postgres like before this existed", logged as a warning, never
+  raised to the caller. A Redis outage in production must never take the
+  API down with it.
+- Wired into the four routes the load test showed matter most: `/api/home`,
+  `/api/competitions/{id}/standings`, `/api/players/catalog` (keyed on
+  every filter/sort/page combination), `/api/players/facets`. Each route's
+  DB logic moved into a `_compute_*` helper returning a plain JSON-safe
+  dict; the route function does cache lookup -> `_compute_*` on a miss ->
+  parses the (possibly cached) dict back into its real Pydantic response
+  model, so `response_model` validation is unaffected either way.
+- Tested three ways: (1) full pytest suite (20 tests, including the
+  existing 16) passes with NO `REDIS_URL` set -- confirms zero behavior
+  change when the cache is off, which is the default; (2) new
+  `backend/tests/test_cache.py` (4 tests) uses `fakeredis` (real Redis wire
+  protocol, in-memory, no server needed) to prove the cache actually works,
+  not just that it degrades gracefully -- a real cache hit skips
+  `compute()` entirely, different keys don't collide, TTL expiry forces a
+  real recompute, and a simulated mid-request Redis error still returns the
+  correct value; (3) manually ran the live server with `REDIS_URL` pointing
+  at a port nothing is listening on -- every request still returned 200,
+  the connection error was logged as a warning, confirmed live, not just
+  in a test.
+- `redis`/`fakeredis` added to `requirements.txt`, pinned to what's
+  actually installed (8.1.0 / 2.37.1).
+
+Next when `redis-server` exists: set `REDIS_URL=redis://localhost:6379` in
+`.env`, restart, then re-run the 1000-concurrent read-only load test
+(`backend/loadtest/locustfile.py BrowsingUser`) to see whether it actually
+closes the gap between the 4-worker result (p95 1600ms) and something
+closer to "instant" -- that comparison is the real point of building this,
+not just having Redis wired up unmeasured.
+
 ## Blocked on the user
 
 - **`players.position`** (OT/CF/CB) — null for every player. Not scrapeable
@@ -356,6 +403,16 @@ reverted to normal single-worker mode after measuring.
   straight from the box score; goalkeepers don't (confirmed, not a bug).
   Needs a team-squad page sample to resolve properly; currently matched by
   (name, club) instead. Not blocking anything today, just less robust.
+- **`redis-server` isn't installed** — needs `sudo apt-get install
+  redis-server` in the user's own terminal (same reason Postgres/pip needed
+  it earlier: `sudo` requires an interactive password this environment can't
+  provide). The application-side cache code (`app/core/cache.py`, wired into
+  home/standings/catalog/facets) is done and tested against `fakeredis`
+  (hit/miss/TTL/failure-fallback all verified) and also manually confirmed
+  to degrade gracefully with a real `REDIS_URL` pointing at nothing (200s,
+  a logged warning, no cache benefit) -- but the actual perf benefit this
+  was built for (see the load-test section above) can't be measured live
+  until a real Redis process exists to point `REDIS_URL` at.
 
 ## Suggested next steps, roughly in order
 

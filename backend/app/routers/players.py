@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import get_or_compute_json
 from app.core.db import get_db
 from app.schemas import PlayerCatalogOut, PlayerFacetsOut, PlayerDetailOut, PlayerOut, PlayerSeasonStats, PriceHistoryPoint
 from db.models import EntityType, FantasyScore, Matchday, Player, Position, PriceHistoryEntry
@@ -34,6 +35,25 @@ async def player_catalog(
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> PlayerCatalogOut:
+    # Cached (Phase 2 of the performance plan) -- keyed on every filter/sort/
+    # page combination, since each is a genuinely different result set.
+    cache_key = f"catalog:v1:{competition_id}:{search}:{position}:{club}:{sort}:{limit}:{offset}"
+    data = await get_or_compute_json(
+        cache_key, lambda: _compute_catalog(competition_id, search, position, club, sort, limit, offset, db)
+    )
+    return PlayerCatalogOut(**data)
+
+
+async def _compute_catalog(
+    competition_id: uuid.UUID | None,
+    search: str | None,
+    position: Position | None,
+    club: str | None,
+    sort: str,
+    limit: int,
+    offset: int,
+    db: AsyncSession,
+) -> dict:
     filters = []
     if competition_id is not None:
         filters.append(Player.competition_id == competition_id)
@@ -54,18 +74,26 @@ async def player_catalog(
     result = await db.execute(
         select(Player).where(*filters).order_by(ordering, Player.id).limit(limit).offset(offset)
     )
-    return PlayerCatalogOut(items=list(result.scalars().all()), total=total or 0, limit=limit, offset=offset)
+    items = [PlayerOut.model_validate(p).model_dump(mode="json") for p in result.scalars().all()]
+    return {"items": items, "total": total or 0, "limit": limit, "offset": offset}
 
 
 @router.get("/facets", response_model=PlayerFacetsOut)
 async def player_facets(
     competition_id: uuid.UUID | None = None, db: AsyncSession = Depends(get_db)
 ) -> PlayerFacetsOut:
+    # Cached (Phase 2 of the performance plan).
+    cache_key = f"facets:v1:{competition_id}"
+    data = await get_or_compute_json(cache_key, lambda: _compute_facets(competition_id, db))
+    return PlayerFacetsOut(**data)
+
+
+async def _compute_facets(competition_id: uuid.UUID | None, db: AsyncSession) -> dict:
     filters = [] if competition_id is None else [Player.competition_id == competition_id]
     clubs = await db.execute(select(Player.real_club).where(*filters).distinct().order_by(Player.real_club))
     # Shared contract: list supported filters even before verified positions
     # arrive. This does not assign a position to any player.
-    return PlayerFacetsOut(clubs=list(clubs.scalars()), positions=[position.value for position in Position])
+    return {"clubs": list(clubs.scalars()), "positions": [position.value for position in Position]}
 
 
 @router.get("/{player_id}", response_model=PlayerDetailOut)

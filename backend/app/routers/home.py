@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import get_or_compute_json
 from app.core.db import get_db
 from app.routers.competitions import get_standings
 from app.schemas import HomeOut, MatchdaySummary, MatchOut
@@ -44,6 +45,15 @@ async def home(
     matchday_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> HomeOut:
+    # 404s (bad competition_id/matchday_id) intentionally aren't cached --
+    # only the successful-response path below goes through the cache, so a
+    # typo'd ID doesn't need any special-casing here.
+    cache_key = f"home:v1:{competition_id}:{matchday_id or 'latest'}"
+    data = await get_or_compute_json(cache_key, lambda: _compute_home(competition_id, matchday_id, db))
+    return HomeOut(**data)
+
+
+async def _compute_home(competition_id: uuid.UUID, matchday_id: uuid.UUID | None, db: AsyncSession) -> dict:
     # The frontend session's second review caught a real inconsistency here:
     # this used to always pick "the most recent season for this competition"
     # independently of matchday_id, then call get_standings with no season
@@ -97,4 +107,4 @@ async def home(
         matches=[MatchOut.model_validate(m) for m in matches],
         standings_top4=standings[:4],
         updated_at=updated_at,
-    )
+    ).model_dump(mode="json")

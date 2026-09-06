@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import get_or_compute_json
 from app.core.db import get_db
 from app.schemas import CompetitionOut, MatchdayOut, StandingsRow
 from db.models import Competition, Match, Matchday, MatchStatus, Season
@@ -35,7 +36,17 @@ async def get_standings(
     season (see home.py, which caught a real bug here: it was picking a
     matchday from one season while this endpoint silently summed matches
     across all of them) can keep the two consistent.
+
+    Cached (Phase 2 of the performance plan) -- only changes when the
+    scraper writes new match results, same freshness window as the
+    Cache-Control header this route already carries.
     """
+    cache_key = f"standings:v1:{competition_id}:{season_id or 'all'}"
+    data = await get_or_compute_json(cache_key, lambda: _compute_standings(competition_id, db, season_id))
+    return [StandingsRow(**row) for row in data]
+
+
+async def _compute_standings(competition_id: uuid.UUID, db: AsyncSession, season_id: uuid.UUID | None) -> list[dict]:
     query = (
         select(Match)
         .join(Matchday, Matchday.id == Match.matchday_id)
@@ -79,7 +90,8 @@ async def get_standings(
     for r in table.values():
         r.goal_difference = r.goals_for - r.goals_against
 
-    return sorted(table.values(), key=lambda r: (-r.points, -r.goal_difference, -r.goals_for))
+    ranked = sorted(table.values(), key=lambda r: (-r.points, -r.goal_difference, -r.goals_for))
+    return [r.model_dump(mode="json") for r in ranked]
 
 
 @router.get("/{competition_id}/matchdays", response_model=list[MatchdayOut])
