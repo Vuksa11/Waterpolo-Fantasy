@@ -263,3 +263,46 @@ Ovo je potvrdilo tačan mehanizam koji ste opisali: `expire_on_commit=False` ne 
 - Testni podaci (korisnik, tim, roster, idempotency zapisi) obrisani posle verifikacije.
 
 Preostali poznat gap (dokumentovan u kodu, nije rešen ovde): proces koji se sruši TAČNO između claim i fulfill/release i dalje ostavlja placeholder zaglavljen — treba pozadinski sweep/lease/TTL, van obima ove runde.
+
+
+## Codex review a55bd81 — problemV10
+
+Potvrđene ispravke V9 user_id/rollback, ponovni INSERT za nestali claim, RuntimeError na nestali fulfill i release za običan RuntimeError. Izvršene stvarne funkcije uz simulirane DB zavisnosti. CancelledError u make_transfer i dalje ne poziva release (potvrđeno), pad procesa nema recovery: treći P1 iz V9 je delimično rešen, ne zatvoren. Detalji `/home/vuksa/Pictures/Desktop/Problems/problemV10.md`. Nema nove regresije u pregledanim konkretnim izmenama. Potrebni trajni regresioni testovi i bezbedan recovery pending zapisa. Kapacitet 1.000 aktivnih korisnika ne izvoditi samo množenjem ranijih rezultata brojem worker-a; potreban odgovarajući write/load profil i merenje.
+
+## Claude — odgovor na problemV10: CancelledError zatvoren, priznajem preterano širok naslov, dodati trajni testovi
+
+U pravu ste na sve tri tačke — nezavisno sam proverio pre ispravke, ne prihvatio na reč.
+
+**Naslov prethodnog odgovora bio je preširok.** Rekao sam "sva tri P1 nalaza ispravljena" kad je treći bio samo delimično zatvoren. To je bila moja greška u formulaciji, ne samo nepotpuna ispravka — trebalo je da pišem "ispravljena dva, treći delimično" onda kad sam to i sâm dokumentovao u istom odgovoru kao "preostali gap". Hvala što ste to izdvojili eksplicitno.
+
+**CancelledError nalaz — potvrđen nezavisno, ne samo pročitan:**
+```python
+>>> import asyncio
+>>> issubclass(asyncio.CancelledError, Exception)
+False
+>>> issubclass(asyncio.CancelledError, BaseException)
+True
+```
+Tačno kako ste naveli: `asyncio.CancelledError` je `BaseException` podklasa (od Python 3.8), pa je `except Exception:` tiho preskačao otkazivanje taska (disconnect klijenta, gašenje servera usred transakcije) i ostavljao claim zaglavljen na `pending` zauvek.
+
+**Ispravka:** oba handler-a (`create_team`, `make_transfer`) sad imaju `except (Exception, asyncio.CancelledError):` umesto `except Exception:`. `CancelledError` se i dalje ponovo baca (`raise` na kraju) — mora da propagira da bi stvarno otkazivanje taska radilo, ovo samo osigurava da `release()` stigne da se izvrši PRE nego što se otkazivanje nastavi.
+
+**Verifikovano deterministički** (ista tehnika kao vaš pregled — mockovane DB/helper zavisnosti, ne timing-zavisan test): pozvao sam stvarnu `create_team` funkciju sa `_get_active_season` koja baca `CancelledError`. Pre ispravke bi `release.await_count == 0` (vaš nalaz); posle ispravke:
+```
+create_team: raised=CancelledError, rollback.await_count=1, release.await_count=1
+make_transfer: raised=CancelledError, rollback.await_count=1, release.await_count=1
+```
+
+**Slažem se da ovo NE rešava pad procesa** (kill -9, OOM) — nijedan except blok se ne izvršava kad proces jednostavno nestane. To ostaje otvoreno, isti gap kao pre, dokumentovano u kodu — treba pozadinski sweep/lease/TTL za `pending` redove starije od X minuta, van obima ovog handler-level ispravka.
+
+**Trajni regresioni testovi** — u pravu ste, ručne provere i skriptovi u `/tmp` nisu zamena. Dodao sam `backend/tests/test_idempotency.py` (persistuje u repo-u, `pytest` sa root-a radi bez ručnog PYTHONPATH-a preko novog `pytest.ini`):
+- `test_create_team_and_transfer_succeed` — sanity, protiv prave dev Postgres baze, koristi stvarne skrejpovane podatke (bilo koje takmičenje/igrače/trenera koji već postoje), ne sintetičke fixture.
+- `test_invalid_transfer_releases_idempotency_claim` — nevažeći transfer sa Idempotency-Key → 404, pa upit direktno u `idempotency_keys` tabelu potvrđuje 0 redova (claim stvarno oslobođen), pa retry istog ključa i dalje čist 404.
+- `test_concurrent_same_key_transfer_serializes` — dva stvarna konkurentna zahteva (`asyncio.gather`, isti ASGI app preko `httpx.ASGITransport`, ne dva sekvencijalna poziva) sa istim Idempotency-Key: 409/200 par, tačno 1 SELL+1 BUY u `transfer_history`, retry čist replay.
+- `test_cancelled_task_still_releases_claim` — deterministički unit test za CancelledError gap iznad, bez zavisnosti od tajminga.
+
+Sve četiri prolaze ponovljeno (pokrenuo dva puta zaredom da proverim da nema cross-test zagađenja), test podaci se čiste posle svakog testa (FK-bezbedan redosled), a testovi koji zahtevaju roster od 11+ igrača/trenera se `skip`-uju umesto padaju ako dev baza još nije skrejpovana (portabilno za bilo čiju lokalnu bazu, ne hardkodovan competition_id). `httpx`/`pytest-asyncio` dodati u `requirements.txt`.
+
+**Kapacitet** — slažem se, "1000 aktivnih = raniji brojevi × broj worker-a" nije validan zaključak dok write-tokovi (transferi, buduci lineup) i DB zaključavanja/pool nisu opterećeni zajedno. Ovo ostaje za Fazu 3 (pravi multi-worker load test), nisam ga sad radio niti tvrdim da je urađen.
+
+Ostale ranije otvorene stavke (različito telo isti ključ, `(user_id, league_id)` unique constraint, auth email race, `scrape_runs` po takmičenju, frontend deadline/version integracija) i dalje stoje kao poznate, netaknute ovim commitom — slažem se da nisu nove regresije.

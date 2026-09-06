@@ -13,6 +13,7 @@ validated. Team creation here only checks roster size (11 players + 1 coach)
 and budget, not position mix.
 """
 
+import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -382,14 +383,19 @@ async def create_team(
         await _fulfill_idempotency_key(db, user_id, endpoint, idempotency_key, status.HTTP_201_CREATED, result_out)
         await db.commit()  # single atomic commit: team + roster + idempotency record together
         return result_out
-    except Exception:
+    except (Exception, asyncio.CancelledError):
         # Not `except HTTPException` -- problemV9 pointed out a plain
         # HTTPException-only catch leaves the idempotency claim stuck at
         # "pending" forever for any OTHER exception (a bug, a DB error), not
-        # just a process crash. Broadening this doesn't fully solve that
-        # (still nothing recovers a claim if release() itself never runs --
-        # see _release_idempotency_key's docstring) but it closes the gap
-        # for every failure this process can actually catch and act on.
+        # just a process crash. `asyncio.CancelledError` is listed explicitly
+        # alongside `Exception` -- problemV10 pointed out it's a BaseException
+        # subclass (since Python 3.8), so a bare `except Exception` silently
+        # skips it, and a cancelled task (client disconnect, server shutdown)
+        # would leave the claim stuck at "pending" forever with no release.
+        # Still doesn't fully solve the gap: a hard process crash (kill -9)
+        # runs no exception handler at all, so nothing here recovers that --
+        # see _release_idempotency_key's docstring; that needs a background
+        # sweep/lease, tracked separately, not fixed by this except clause.
         await db.rollback()
         await _release_idempotency_key(db, user_id, endpoint, idempotency_key)
         raise
@@ -529,14 +535,19 @@ async def make_transfer(
         await _fulfill_idempotency_key(db, user_id, endpoint, idempotency_key, status.HTTP_200_OK, result_out)
         await db.commit()  # single atomic commit: transfer + idempotency record together
         return result_out
-    except Exception:
+    except (Exception, asyncio.CancelledError):
         # Not `except HTTPException` -- problemV9 pointed out a plain
         # HTTPException-only catch leaves the idempotency claim stuck at
         # "pending" forever for any OTHER exception (a bug, a DB error), not
-        # just a process crash. Broadening this doesn't fully solve that
-        # (still nothing recovers a claim if release() itself never runs --
-        # see _release_idempotency_key's docstring) but it closes the gap
-        # for every failure this process can actually catch and act on.
+        # just a process crash. `asyncio.CancelledError` is listed explicitly
+        # alongside `Exception` -- problemV10 pointed out it's a BaseException
+        # subclass (since Python 3.8), so a bare `except Exception` silently
+        # skips it, and a cancelled task (client disconnect, server shutdown)
+        # would leave the claim stuck at "pending" forever with no release.
+        # Still doesn't fully solve the gap: a hard process crash (kill -9)
+        # runs no exception handler at all, so nothing here recovers that --
+        # see _release_idempotency_key's docstring; that needs a background
+        # sweep/lease, tracked separately, not fixed by this except clause.
         await db.rollback()
         await _release_idempotency_key(db, user_id, endpoint, idempotency_key)
         raise

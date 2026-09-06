@@ -51,8 +51,17 @@ DATABASE_URL_SYNC=postgresql+psycopg2://waterpolo:waterpolo@localhost:5432/water
 ```
 
 **Migrations**: `cd backend && ../.venv/bin/python -m alembic upgrade head`.
-Current head: `f2806bcaae2f` (4 migrations total, see
+Current head: `d86291b3557f` (6 migrations total, see
 `backend/alembic/versions/`).
+
+**Running tests**: `.venv/bin/python -m pytest` from the repo root (no manual
+`PYTHONPATH`/`DATABASE_URL` needed -- `pytest.ini` sets `pythonpath`, and
+`.env` already has `DATABASE_URL`). Tests run against the real local dev
+Postgres DB (this project has no sqlite/mock-DB layer), create their own rows
+and clean them up after. `backend/tests/test_idempotency.py` is the only
+suite on `main` so far -- Codex's `frontend` branch has its own, broader
+suite (`backend/tests/test_teams.py` etc., using an in-memory sqlite adapter)
+that should be reconciled/merged in once branches combine, not duplicated.
 
 ## Another AI (Codex) is building the frontend — read this before touching backend/app
 
@@ -144,7 +153,22 @@ scraped, not synthetic):
   transfer rows. Every finding across all three rounds was re-verified by
   reading the exact cited code (or reproducing it directly) before fixing,
   not accepted on trust -- worth continuing that habit, Codex's reviews have
-  had a 100% hit rate on real bugs so far.
+  had a 100% hit rate on real bugs so far. (4) problemV10: caught that my
+  problemV9 fix's `except Exception` doesn't catch `asyncio.CancelledError`
+  (a `BaseException` subclass since Python 3.8, confirmed independently) --
+  a cancelled request task (client disconnect, server shutdown) mid-transfer
+  still left the idempotency claim stuck at "pending" forever. Also correctly
+  called out that my prior "all three P1s fixed" framing was overstated when
+  the third was only partially closed. Fixed: both handlers now catch
+  `except (Exception, asyncio.CancelledError)`, re-verified deterministically
+  (mocked fault injection, same technique Codex used) that `release()` now
+  runs and `CancelledError` still propagates correctly. Also added real
+  persisted regression tests (`backend/tests/test_idempotency.py`, run via
+  plain `pytest` from repo root thanks to the new `pytest.ini`) per Codex's
+  point that manual/scratch-script checks aren't a substitute -- covers the
+  normal-transfer, invalid-transfer-releases-claim, concurrent-race, and
+  cancellation scenarios. Process-crash recovery (kill -9) remains an
+  explicitly open gap, not solved by this or any exception handler.
 
 ## Blocked on the user
 
