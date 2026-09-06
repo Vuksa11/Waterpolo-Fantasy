@@ -446,15 +446,86 @@ just for this session).
   Needs a team-squad page sample to resolve properly; currently matched by
   (name, club) instead. Not blocking anything today, just less robust.
 
+## Independent review by "Fable" (separate session, 2026-09-06)
+
+The user ran a second, independent AI session (Fable model) specifically to
+evaluate the work so far -- not part of the Claude<->Codex collaboration,
+no prior involvement in writing any of this code. Full report saved at
+`docs/NEZAVISNA_OCENA_KODA.md` (Serbian). Overall verdict: 6.5/10 -- code
+quality/transactional correctness scored 8.5/10 ("surprisingly mature"),
+but fantasy-product completeness scored 3/10 because the actual scoring
+loop doesn't exist yet, and production-readiness outside features scored
+4/10. Findings independently verified live (ran the test suite, hit
+running endpoints with SQLi/XSS/oversized-password/brute-force attempts,
+read the code directly) -- this isn't a docs-only review.
+
+**Confirmed independently before acting on it** (same discipline used for
+every Codex review round): grepped the codebase myself and confirmed
+`fantasy_teams.total_points` is read but genuinely never written anywhere.
+
+Critical findings (blocking "real fantasy product," not code-quality bugs):
+1. **No team-level scoring aggregation** -- `scoring/engine.py` computes
+   per-player `raw_points` correctly, but nothing sums a saved lineup's
+   active-player scores (with captain x2 / bench x0.5 multipliers) into
+   `fantasy_teams.total_points` after a matchday. This is the single
+   biggest gap -- already correctly flagged as "not yet built" in
+   `docs/Fantasy_Waterpolo_Arhitektura_v2.md` Section 7 item 8, but worth
+   naming explicitly: auth/teams/transfers/idempotency/pricing all work:
+   scoring itself is the one missing piece of the actual game loop.
+2. **No fantasy leaderboard** -- FIXED same session, see the commit above
+   (`GET /api/competitions/{id}/leaderboard`, correct in shape today, will
+   show real numbers once #1 is built).
+3. **`players.position` still null for every player** -- known, honestly
+   documented, blocked on the project owner's reference file. Named
+   explicitly here because its real consequence is that "API mode" is
+   currently a read-only demo, not an end-to-end playable game, since
+   `save_lineup` correctly rejects every real roster.
+4. **No rate limiting / brute-force protection on auth** -- confirmed live:
+   15 consecutive wrong-password attempts against the same account all
+   returned a clean 401, no 429, no lockout, no CAPTCHA. bcrypt's own cost
+   is the only friction (~240ms/attempt), which slows but doesn't stop a
+   distributed or patient attacker. Not yet fixed.
+5. **No email verification or password reset.** Not yet fixed.
+6. **No logging/observability/monitoring** -- no Sentry/structlog/
+   Prometheus, errors only ever go to the process's own stdout traceback.
+   Particularly relevant since the scraper (an external dependency on a
+   third-party site) can silently break with nothing raising an alert.
+   Not yet fixed.
+7. **No CI/CD pipeline** -- test suite exists and is good, but nothing runs
+   it automatically on push. Not yet fixed.
+
+Minor findings (not blocking, worth tracking): no CORS middleware (fine
+today since the frontend proxies same-origin, would matter for any second
+client e.g. the planned mobile app); `/docs` (Swagger UI) publicly exposed
+with no protection; `scrape_runs` not scoped per competition (already
+known); idempotency crash-recovery still open (already known, tracked
+since problemV9); no `(user_id, league_id)` unique constraint on
+`fantasy_teams` (already known, tracked since problemV8); `datetime.utcnow()`
+deprecation warnings (cosmetic); no admin/moderation layer; the
+architecture doc (Section 2.1) still lists "one wildcard per season" as
+in-scope even though it was deliberately never implemented once the
+transfer limit it depended on was removed -- worth reconciling the doc.
+
+Legal status of scraping totalwaterpolo.com was explicitly excluded from
+this review's scope (the project owner's call, not a technical question).
+
 ## Suggested next steps, roughly in order
 
-1. When the position/coach file arrives: backfill `players.position` and
-   real `Coach` names, then build lineup management (adopt Codex's tested
-   API shape rather than designing fresh).
-2. Check in on `FantasyWP-frontend` and merge when both sides are ready
-   (watch for the alembic branching noted in the handoff doc — two
-   migrations may share a `down_revision` and need reconciling).
-3. Goalkeeper ID resolution via a team-squad page sample, if/when convenient.
-4. Everything else is tracked in `docs/Fantasy_Waterpolo_Arhitektura_v2.md`,
+1. Decide with the user which of Fable's findings to prioritize next --
+   team-level scoring aggregation (the biggest product gap, but the
+   "real" version depends on players.position/lineup which is blocked;
+   could build a roster-based interim version now, or wait) vs. the
+   production-hardening items (rate limiting is cheap and independent of
+   any blocker; email verification, CI, observability are all also
+   independent and could be picked up any time).
+2. When the position/coach file arrives: backfill `players.position` and
+   real `Coach` names, then build lineup management properly (Codex's
+   tested API shape is already merged into `main`'s `teams.py`), and real
+   (not interim) team-level scoring.
+3. Reconcile with the `frontend` branch again once Codex has rebased onto
+   the merged `main` (see the merge section above) -- most hard conflicts
+   are already resolved there, so this should be a thinner pass.
+4. Goalkeeper ID resolution via a team-squad page sample, if/when convenient.
+5. Everything else is tracked in `docs/Fantasy_Waterpolo_Arhitektura_v2.md`,
    Section 7 — that list is kept current; trust it over memory of what "next
    steps" were at any earlier point in this file.
