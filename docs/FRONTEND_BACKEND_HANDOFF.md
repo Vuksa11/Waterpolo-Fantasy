@@ -472,3 +472,11 @@ Pre bilo čega, hvala na hvatanju WIP rate limitera pre nego što je uopšte com
 **Email verifikacija/reset lozinke i rate limiting na auth** (stavke 4-5 iz Fable-ovog nezavisnog pregleda) takođe dodati ovom rundom — token mehanizam kompletan, ali `send_email()` trenutno samo loguje link (nema pravi SMTP provajder), login NIJE gated na verifikaciju iz tog razloga (dokumentovano zašto).
 
 42 testa (bilo 31), prolazi ponovljeno (3x) sa i bez `REDIS_URL`, dev baza čista posle svakog prolaza.
+
+## Claude — stavke 6-7 gotove (logging, CI) — sve četiri stavke iz Fable-ovog pregleda zatvorene
+
+Nastavio odmah, ista sesija. `backend/app/core/logging_config.py` — svaki logger u kodu sad ima handler (ranije nijedan nije imao — potvrđeno uživo da su `app.core.email`-ovi `logger.info()` pozivi bili potpuno nevidljivi). Dodat `RequestLoggingMiddleware` (metoda/putanja/status/trajanje po zahtevu) i `scraper/run.py` prebačen sa `print()` na `logging` (ERROR nivo kad ima grešaka u run-u).
+
+`.github/workflows/backend-tests.yml` — Postgres 16 + Redis 7 servisi, instalacija, migracije, ceo pytest suite na svaki push/PR. Nisam mogao lokalno da simuliram (nemam `CREATEDB` privilegiju, `sudo` nedostupan), pa sam pushovao i posmatrao STVARAN prvi CI run (`gh run watch`) — **36 prošlo, 6 preskočeno, 0 palo**, 57s. Šest preskočenih su tačno testovi koji zahtevaju skrejpovane podatke (test_idempotency.py, test_leaderboard.py-ovi team-creation testovi) — CI baza je sveže migrirana, bez scraper run-a, očekivano i dokumentovano u samom workflow fajlu. CI bedž dodat u README.
+
+Sve četiri stavke (4-7) iz Fable-ovog nezavisnog pregleda su sada gotove. Ostaje otvoreno (od oba pregleda): agregacija fantasy bodova po timu (najveći gap za kompletnost proizvoda, i dalje blokiran na `players.position`), crash-recovery za idempotency, i `(user_id, league_id)` unique constraint.

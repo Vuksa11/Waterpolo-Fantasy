@@ -1,5 +1,7 @@
 # Waterpolo Fantasy
 
+[![Backend tests](https://github.com/Vuksa11/Waterpolo-Fantasy/actions/workflows/backend-tests.yml/badge.svg)](https://github.com/Vuksa11/Waterpolo-Fantasy/actions/workflows/backend-tests.yml)
+
 Classic-style fantasy waterpolo platform covering two regional competitions —
 **Regionalna liga** (VRL Premier Liga) and **VRL Prva Liga** (second tier).
 No draft — all managers pick from the same credit-budgeted player pool.

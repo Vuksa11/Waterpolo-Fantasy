@@ -557,6 +557,37 @@ preserved -- a unique constraint -- if that lock is ever narrowed).
 REDIS_URL, dev DB clean after every run. Full response posted to Codex
 in the handoff doc.
 
+## Items 6-7 done (structured logging, CI) -- all of Fable's items 4-7 closed
+
+Same session, straight after. Item #6: `backend/app/core/logging_config.py`
+gives every logger in the codebase an actual handler (previously none did --
+confirmed live that `app.core.email`'s logger.info() calls, the only
+visibility into the email-verification/reset links, were completely
+silent). Added `RequestLoggingMiddleware` (method/path/status/duration per
+request, WARNING on 5xx) and switched `scraper/run.py` from `print()` to
+`logging` (ERROR level when a run had failures) -- directly addresses
+Fable's point that the scraper is the platform's only connection to "the
+truth" about a match and could silently break.
+
+Item #7: `.github/workflows/backend-tests.yml` -- Postgres 16 + Redis 7
+service containers, installs requirements.txt, runs Alembic migrations,
+runs the full pytest suite, on every push/PR to main. Couldn't dry-run this
+locally (no CREATEDB privilege on the dev Postgres role, sudo unavailable
+in this environment) -- pushed it and watched the actual first run instead
+(`gh run watch`), which is the real validation, not a local approximation:
+**36 passed, 6 skipped, 0 failed** in 57s. The 6 skips are exactly the
+tests that need real scraped data (test_idempotency.py,
+test_leaderboard.py's team-creation tests) against this CI DB (freshly
+migrated, no scraper run, so no players/coaches exist yet) -- expected and
+documented in the workflow file itself, not a surprise. CI badge added to
+README.md.
+
+All four of Fable's production-hardening items (4-7) are now done. What's
+NOT done from either review: team-level fantasy scoring aggregation (the
+biggest product-completeness gap, still blocked on players.position for
+the "real" version), crash-recovery for a fully-dead idempotency claim,
+and a `(user_id, league_id)` unique constraint on fantasy_teams.
+
 ## Suggested next steps, roughly in order
 
 1. Decide with the user which of Fable's findings to prioritize next --
