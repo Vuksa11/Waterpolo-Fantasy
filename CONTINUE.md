@@ -266,6 +266,57 @@ race, auth email uniqueness race, per-competition `scrape_runs` freshness,
 real position/deadline data (blocked on the project owner), and the actual
 1000-concurrent load test (Phase 3, not started).
 
+## Load test with the write profile (2026-09-06, commit `76894ab`)
+
+User said not to wait for Codex (unavailable until ~noon) and to keep going
+with the agreed plan -- "measure before Redis" per the performance plan, now
+that the merge is done. Extended `backend/loadtest/locustfile.py` with the
+transfer/lineup/idempotency-retry coverage Codex's V10/V12/V14 reviews had
+correctly flagged as missing (only `create_team` was covered before). Added
+`backend/loadtest/prepare_upcoming_matchday.py` -- needed because every real
+matchday in the dev DB is a finished historical round with no deadline, so
+transfer()/save_lineup() would 409 instantly without a test-only
+UPCOMING+future-deadline matchday, which would measure nothing useful about
+write-lock behavior under load.
+
+**100 concurrent, 90s, full write profile**: 0% failures across 3761
+requests, aggregate p95 30ms, p99 57ms.
+
+**300 concurrent, 90s, full write profile**: still 0% failures, but latency
+degrades a lot -- aggregate p95 250ms, p99 920ms, `POST /api/teams` p98
+~2700ms. Tried 4 uvicorn workers (with `DB_POOL_SIZE`/`DB_MAX_OVERFLOW`
+turned down to 10/10 each to stay under Postgres's `max_connections=100`) --
+didn't meaningfully help, which is itself informative.
+
+**Isolated the cause**: re-ran the same 300-concurrent test with ONLY
+`BrowsingUser` (no writes at all) -- aggregate p95 drops to **37ms**, p99 to
+**67ms**, still 0% failures. So the read-heavy majority of real traffic
+already scales fine today, no Redis needed for that. The degradation comes
+specifically from `create_team`'s `Season...with_for_update()` row lock,
+held across the ENTIRE handler (league lookup/create, roster insert,
+idempotency fulfill, commit) -- every concurrent create_team call for the
+SAME season effectively serializes behind it. More workers didn't help
+because the bottleneck is DB row-lock contention, not CPU/process capacity.
+
+Did NOT touch `create_team`'s locking logic -- it's the frontend branch's
+business decision (presumably deliberate, to prevent a duplicate "Globalna
+liga" row under concurrency), and create_team is a rare once-per-user event,
+not something that affects typical browsing. Proposed in the handoff doc (not
+implemented): a partial unique index on `leagues(season_id) WHERE admin_id IS
+NULL` could give the same duplicate-prevention guarantee without holding a
+lock across the whole handler -- catch the IntegrityError and re-read,
+similar to the idempotency claim pattern. Left as an open discussion point,
+not an unrequested rewrite of their code.
+
+**Conclusion**: the "instant" feel for read-heavy traffic is already
+achieved up to 300 concurrent without Redis. Not starting Phase 2 (Redis)
+until there's an actual reason to -- current indexes/pool tuning are
+sufficient for reads. `create_team` write contention stays open for
+discussion, not an urgent fix. Raw CSVs in `backend/loadtest/results/`.
+Reverted the server back to a normal single-worker process after
+measuring -- the 4-worker run was only for this test, not a deployment
+change.
+
 ## Blocked on the user
 
 - **`players.position`** (OT/CF/CB) — null for every player. Not scrapeable
