@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,12 +17,28 @@ from db.models import EntityType, FantasyScore, Matchday, Player, Position, Pric
 
 router = APIRouter(prefix="/api/players", tags=["players"])
 
+_COST_DESC = Player.current_cost.desc()
+_COST_ASC = Player.current_cost.asc()
 _CATALOG_SORT_MAP = {
-    "current_cost_desc": Player.current_cost.desc(),
-    "current_cost_asc": Player.current_cost.asc(),
+    # Both namings accepted: "cost_*" is the documented contract, "current_cost_*"
+    # is the original internal naming this endpoint shipped with before the
+    # frontend session's tests pinned down the public contract. Keeping both as
+    # aliases to the same clause rather than picking one avoids breaking whichever
+    # caller is out there using the other spelling.
+    "cost_desc": _COST_DESC,
+    "current_cost_desc": _COST_DESC,
+    "cost_asc": _COST_ASC,
+    "current_cost_asc": _COST_ASC,
     "name_asc": Player.name.asc(),
     "name_desc": Player.name.desc(),
 }
+
+
+def _escape_like(value: str) -> str:
+    """Escape SQL LIKE/ILIKE metacharacters so a literal '%' or '_' in a
+    search term is matched literally instead of acting as a wildcard --
+    caught by a test searching for a player literally named with a '%'."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 @router.get("", response_model=list[PlayerOut])
@@ -39,31 +55,31 @@ async def list_players(
 @router.get("/catalog", response_model=PlayerCatalogOut)
 async def player_catalog(
     competition_id: uuid.UUID | None = None,
-    search: str | None = None,
+    search: str | None = Query(None, max_length=100),
     position: str | None = None,
     club: str | None = None,
-    sort: str = "current_cost_desc",
-    limit: int = 24,
-    offset: int = 0,
+    sort: str = "cost_desc",
+    limit: int = Query(24, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> PlayerCatalogOut:
     """
     Paginated, filterable, DB-side player list -- the contract agreed with the
-    frontend session in docs/FRONTEND_BACKEND_HANDOFF.md. `limit` is clamped
-    to [1, 100]. Sort always tie-breaks on `id` so pagination is stable even
-    when many players share the same cost/name.
+    frontend session in docs/FRONTEND_BACKEND_HANDOFF.md. `limit`/`offset`/
+    `search` length are enforced (422 if out of range, not silently clamped
+    -- a test asserted this). Sort always tie-breaks on `id` so pagination is
+    stable even when many players share the same cost/name.
     """
-    limit = min(max(limit, 1), 100)
-    offset = max(offset, 0)
-
     if position is not None and position not in Position.__members__:
         raise HTTPException(status_code=422, detail=f"Invalid position '{position}'")
+    if sort not in _CATALOG_SORT_MAP:
+        raise HTTPException(status_code=422, detail=f"Invalid sort '{sort}'")
 
     conditions = []
     if competition_id is not None:
         conditions.append(Player.competition_id == competition_id)
     if search:
-        conditions.append(Player.name.ilike(f"%{search}%"))
+        conditions.append(Player.name.ilike(f"%{_escape_like(search)}%", escape="\\"))
     if position is not None:
         conditions.append(Player.position == Position(position))
     if club is not None:
@@ -75,7 +91,7 @@ async def player_catalog(
         count_query = count_query.where(cond)
         query = query.where(cond)
 
-    order = _CATALOG_SORT_MAP.get(sort, _CATALOG_SORT_MAP["current_cost_desc"])
+    order = _CATALOG_SORT_MAP[sort]
     query = query.order_by(order, Player.id.asc()).limit(limit).offset(offset)
 
     total = await db.scalar(count_query)

@@ -8,7 +8,23 @@ matches, matchdays. See docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 7.
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
+
+# bcrypt hashes only the first 72 bytes of its input and raises ValueError on
+# anything longer (confirmed: this is a hard C-library limit, not something
+# truncating silently) -- both bcrypt.hashpw (register) and bcrypt.checkpw
+# (login) throw, which without this check surfaces as an unhandled 500 for a
+# password a user could reasonably type. Validating here turns it into a
+# clean 422 instead. Bug found by the frontend session's test suite
+# (test_auth_rejects_password_over_bcrypt_byte_limit) against the auth
+# endpoints added in commit 4044304.
+_MAX_PASSWORD_BYTES = 72
+
+
+def _validate_password_length(password: str) -> str:
+    if len(password.encode("utf-8")) > _MAX_PASSWORD_BYTES:
+        raise ValueError(f"Password must be at most {_MAX_PASSWORD_BYTES} bytes (UTF-8 encoded)")
+    return password
 
 
 class UserRegisterIn(BaseModel):
@@ -16,10 +32,14 @@ class UserRegisterIn(BaseModel):
     password: str
     display_name: str
 
+    _validate_password = field_validator("password")(_validate_password_length)
+
 
 class UserLoginIn(BaseModel):
     email: EmailStr
     password: str
+
+    _validate_password = field_validator("password")(_validate_password_length)
 
 
 class UserOut(BaseModel):
