@@ -8,7 +8,31 @@ matches, matchdays. See docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 7.
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr
+
+
+class UserRegisterIn(BaseModel):
+    email: EmailStr
+    password: str
+    display_name: str
+
+
+class UserLoginIn(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+    display_name: str
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
 
 class CompetitionOut(BaseModel):
