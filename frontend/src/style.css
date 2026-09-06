@@ -1432,7 +1432,8 @@ main {
   margin-top: 5px;
   color: #6a8191;
 }
-.team-banner {
+.team-banner,
+.section-banner {
   background: linear-gradient(160deg, #071c2e, #0b3a5c 65%, #0f5279);
   color: white;
   margin: -26px -32px 25px;
@@ -2867,8 +2868,7 @@ footer {
   grid-row: 1;
 }
 .team-summary {
-  position: sticky;
-  top: 96px;
+  position: static;
 }
 @media (max-width: 1180px) {
   .team-layout > .right-rail {
@@ -2927,5 +2927,30 @@ footer {
   }
   .match-time {
     font-size: 9px;
+  }
+}
+
+.page-title.section-banner {
+  margin: -26px -32px 25px;
+  padding: 25px 32px 29px;
+}
+.section-banner h1 {
+  color: white;
+}
+.section-banner p {
+  color: #c7dce9;
+}
+.section-banner .eyebrow {
+  color: var(--yellow);
+}
+.section-banner .credit-chip {
+  background: #ffffff12;
+  border: 1px solid #ffffff24;
+}
+@media (max-width: 720px) {
+  .page-title.section-banner {
+    margin: -20px -16px 20px;
+    padding: 20px 17px;
+    flex-wrap: wrap;
   }
 }

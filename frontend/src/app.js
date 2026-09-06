@@ -157,7 +157,7 @@ function playerSlot(role, id, index, compact = false) {
 }
 function pool(compact = false) {
   const f = FORMATIONS[draft.formation];
-  return `<div class="pool ${compact ? "compact" : ""}" aria-label="Bazen, formacija ${f.label}"><div class="pool-lines"><div class="goal"></div><span class="attack-direction">NAPAD ↑</span><div class="two-meter"></div><div class="six-meter"></div></div>${f.roles.map((role, i) => `<div class="pool-position" style="--x:${f.positions[i][0]}%;--y:${f.positions[i][1]}%">${playerSlot(role, draft.active[i], i, compact)}</div>`).join("")}</div>`;
+  return `<div class="pool ${compact ? "compact" : ""}" aria-label="Bazen, formacija ${f.label}"><div class="pool-lines"><div class="goal"></div><div class="two-meter"></div><div class="six-meter"></div></div>${f.roles.map((role, i) => `<div class="pool-position" style="--x:${f.positions[i][0]}%;--y:${f.positions[i][1]}%">${playerSlot(role, draft.active[i], i, compact)}</div>`).join("")}</div>`;
 }
 function fixtureRows(list = matches) {
   if (!list.length)
@@ -228,7 +228,7 @@ function team() {
   }</section><div class="tactic-tip"><h3>Promena taktike</h3><p>Formacija čuva tvoje igrače. Ako nedostaje odgovarajuća pozicija, mesto ostaje prazno dok ne dovedeš pojačanje.</p></div></aside></div><div class="mobile-validation">${errorsView()}</div><div class="mobile-team-action"><div><span>Preostalo</span><strong>${money(budget())} kr</strong></div><button class="primary" id="mobile-save">Sačuvaj sastav ✓</button></div>`;
 }
 function playersPage() {
-  return `<div class="page-title"><div><div class="eyebrow">SKAUTING I TRANSFERI</div><h1>Igrači</h1><p>Pronađi pravo pojačanje za svoju lepezu.</p></div><div class="credit-chip">${money(budget())} <small>kr na raspolaganju</small></div></div><section class="card"><div class="toolbar"><input id="search" type="search" aria-label="Pretraži igrače" placeholder="Pretraži ime igrača…" maxlength="100" value="${esc(query)}"><select id="position" aria-label="Pozicija"><option value="">Sve pozicije</option>${["GK", "OT", "CF", "CB"].map((p) => `<option ${position === p ? "selected" : ""}>${p}</option>`).join("")}</select><select id="club" aria-label="Klub"><option value="">Svi klubovi</option>${facets.clubs.map((c) => `<option ${club === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select><select id="sort" aria-label="Sortiranje">${[
+  return `<div class="page-title section-banner"><div><div class="eyebrow">SKAUTING I TRANSFERI</div><h1>Igrači</h1><p>Pronađi pravo pojačanje za svoju lepezu.</p></div><div class="credit-chip">${money(budget())} <small>kr na raspolaganju</small></div></div><section class="card"><div class="toolbar"><input id="search" type="search" aria-label="Pretraži igrače" placeholder="Pretraži ime igrača…" maxlength="100" value="${esc(query)}"><select id="position" aria-label="Pozicija"><option value="">Sve pozicije</option>${["GK", "OT", "CF", "CB"].map((p) => `<option ${position === p ? "selected" : ""}>${p}</option>`).join("")}</select><select id="club" aria-label="Klub"><option value="">Svi klubovi</option>${facets.clubs.map((c) => `<option ${club === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select><select id="sort" aria-label="Sortiranje">${[
     ["cost_desc", "Najskuplji prvo"],
     ["cost_asc", "Najjeftiniji prvo"],
     ["name_asc", "Ime A–Z"],
@@ -253,7 +253,7 @@ function fixturesPage() {
   return `<div class="page-title"><div><div class="eyebrow">${esc(currentCompetition()?.name)}</div><h1>Raspored</h1><p>Vreme početka prikazano za Beograd.</p></div><select id="matchday" aria-label="Izaberi kolo">${matchdays.map((d) => `<option value="${d.id}" ${selectedDay === d.id ? "selected" : ""}>${esc(d.label)}</option>`).join("")}</select></div><section class="card"><div class="card-head tinted"><h3>${esc(currentDay()?.label || "Utakmice")}</h3><span class="pill">${matches.length} utakmica</span></div>${fixtureRows()}</section>`;
 }
 function standingsPage() {
-  return `<div class="page-title"><div><div class="eyebrow">${esc(currentCompetition()?.name)}</div><h1>Tabela</h1><p>Plasman klubova na osnovu odigranih utakmica.</p></div><span class="pill">${mode === "demo" ? "Ilustrativni rezultati" : "Sportski API"}</span></div><section class="card table-scroll"><table class="standings-table"><thead><tr><th>#</th><th>Klub</th><th>OD</th><th>P</th><th>I</th><th>Gol</th><th>Bod.</th></tr></thead><tbody>${tableRows()}</tbody></table>${standings.length ? "" : '<div class="empty">Nema odigranih utakmica u bazi.</div>'}</section><div class="notice">Tabela prikazuje podatke koje vraća backend. Obračun posebnih rezultata posle peteraca i sezonски filter još čekaju backend podršku.</div>`;
+  return `<div class="page-title section-banner"><div><div class="eyebrow">${esc(currentCompetition()?.name)}</div><h1>Tabela</h1><p>Plasman klubova na osnovu odigranih utakmica.</p></div><span class="pill">${mode === "demo" ? "Ilustrativni rezultati" : "Sportski API"}</span></div><section class="card table-scroll"><table class="standings-table"><thead><tr><th>#</th><th>Klub</th><th>OD</th><th>P</th><th>I</th><th>Gol</th><th>Bod.</th></tr></thead><tbody>${tableRows()}</tbody></table>${standings.length ? "" : '<div class="empty">Nema odigranih utakmica u bazi.</div>'}</section><div class="notice">Tabela prikazuje podatke koje vraća backend. Obračun posebnih rezultata posle peteraca i sezonски filter još čekaju backend podršku.</div>`;
 }
 const articles = [
   {
@@ -273,7 +273,7 @@ const articles = [
   },
 ];
 function newsPage() {
-  return `<div class="page-title"><div><div class="eyebrow">IZMEĐU DVA KOLA</div><h1>Vesti i vodiči</h1><p>Saznaj više o svojoj sledećoj taktici.</p></div></div><div class="news-grid">${articles.map((a, i) => `<button class="news" data-article="${i}"><div class="news-art ${i === 1 ? "alt" : i === 2 ? "third" : ""}">${i === 0 ? '<img src="/assets/vrl-logo.jpg" alt="VRL konferencija">' : i === 1 ? "4×2" : "2×4"}</div><div class="news-body"><div class="eyebrow">${a.tag}</div><h3>${a.title}</h3><p>Vodič kroz fantasy formacije</p><span class="text-link">Pročitaj više ↗</span></div></button>`).join("")}</div>`;
+  return `<div class="page-title section-banner"><div><div class="eyebrow">IZMEĐU DVA KOLA</div><h1>Vesti i vodiči</h1><p>Saznaj više o svojoj sledećoj taktici.</p></div></div><div class="news-grid">${articles.map((a, i) => `<button class="news" data-article="${i}"><div class="news-art ${i === 1 ? "alt" : i === 2 ? "third" : ""}">${i === 0 ? '<img src="/assets/vrl-logo.jpg" alt="VRL konferencija">' : i === 1 ? "4×2" : "2×4"}</div><div class="news-body"><div class="eyebrow">${a.tag}</div><h3>${a.title}</h3><p>Vodič kroz fantasy formacije</p><span class="text-link">Pročitaj više ↗</span></div></button>`).join("")}</div>`;
 }
 function render() {
   if (!(page in names)) page = "home";
