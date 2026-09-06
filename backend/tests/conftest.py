@@ -18,6 +18,22 @@ import pytest_asyncio
 
 @pytest_asyncio.fixture(autouse=True)
 async def _reset_singleton_clients_after_test():
+    # Cleared BEFORE each test, not just after: httpx's ASGITransport gives
+    # every request the same fake client address (127.0.0.1), so every test
+    # that hits a rate-limited endpoint (app/core/ratelimit.py) shares the
+    # same Redis counter key. Without this, a test suite re-run within the
+    # rate-limit window (up to an hour) would start failing real tests with
+    # 429s that have nothing to do with an actual attack -- confirmed this
+    # is a real risk, not theoretical, since test_frontend_api.py alone
+    # calls register/login far more than the login lockout's limit of 5.
+    from app.core.cache import _get_client
+
+    client = _get_client()
+    if client is not None:
+        keys = [key async for key in client.scan_iter(match="ratelimit:*")]
+        if keys:
+            await client.delete(*keys)
+
     yield
 
     from app.core.db import engine

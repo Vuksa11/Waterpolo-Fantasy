@@ -509,6 +509,85 @@ transfer limit it depended on was removed -- worth reconciling the doc.
 Legal status of scraping totalwaterpolo.com was explicitly excluded from
 this review's scope (the project owner's call, not a technical question).
 
+## Items 4-5 done (rate limiting, email verification/password reset) +
+## 6 real bugs Codex found and fixed, same session (commit 9276c07)
+
+User picked items 4-7 from Fable's list to do next. Built rate limiting
+(app/core/ratelimit.py: per-IP throttle + per-email login lockout,
+directly closing the exact gap Fable demonstrated) and email
+verification/password reset (app/core/email.py logs the link instead of
+sending -- no real SMTP/provider configured; login NOT gated on
+verification for that reason, documented).
+
+While that was still uncommitted work-in-progress, Codex's problemV15
+review caught it on disk and found a real bug: the rate limiter's
+INCR-then-separate-EXPIRE could leave a key with NO ttl if the process
+died between the two -- reproduced independently with fakeredis before
+fixing (TTL stuck at -1, permanently over its limit). Fixed with an
+atomic `SET NX EX` plus a self-heal check for already-damaged keys.
+
+Codex also re-reviewed already-committed code (the Redis/leaderboard
+work from the previous two sections) and found three more real bugs,
+all independently reproduced before fixing:
+- Cache key collision: `f"{search}:{club}"` let DIFFERENT filters
+  produce the SAME key (search="a:None:b",club="c" collided with
+  search="a",club="b:None:c") -- one user's search could get served
+  another's cached results. Fixed with a JSON-encode+hash key builder
+  (`make_cache_key`), applied everywhere, key version bumped.
+- An invalid REDIS_URL raised synchronously OUTSIDE any try/except,
+  propagating out of every cache call instead of degrading to "no
+  cache" like every other failure mode. Fixed.
+- 25 concurrent cache misses for the same key ran the DB query 25
+  times (no in-flight deduplication). Fixed with a per-key
+  `asyncio.Lock` (single-process only, documented).
+
+Also confirmed and fixed: `request.client.host` alone doesn't identify
+the real browser user once `frontend/server.mjs` proxies requests (it
+doesn't set `X-Forwarded-For` today, confirmed by reading it -- every
+user through it currently shares one rate-limit bucket). Added a
+trusted-proxy-only `get_client_ip()` (doesn't trust that header from an
+untrusted source) and proposed a one-line `server.mjs` change to Codex
+in the handoff doc (not implemented there -- their file). And corrected
+a stale comment in `create_team`: the merged handler's Season row lock
+already serializes concurrent calls for the same season, closing the
+race the old comment described as still open (documented what must be
+preserved -- a unique constraint -- if that lock is ever narrowed).
+
+42 tests now (was 31), passes repeatably (3x) with and without
+REDIS_URL, dev DB clean after every run. Full response posted to Codex
+in the handoff doc.
+
+## Items 6-7 done (structured logging, CI) -- all of Fable's items 4-7 closed
+
+Same session, straight after. Item #6: `backend/app/core/logging_config.py`
+gives every logger in the codebase an actual handler (previously none did --
+confirmed live that `app.core.email`'s logger.info() calls, the only
+visibility into the email-verification/reset links, were completely
+silent). Added `RequestLoggingMiddleware` (method/path/status/duration per
+request, WARNING on 5xx) and switched `scraper/run.py` from `print()` to
+`logging` (ERROR level when a run had failures) -- directly addresses
+Fable's point that the scraper is the platform's only connection to "the
+truth" about a match and could silently break.
+
+Item #7: `.github/workflows/backend-tests.yml` -- Postgres 16 + Redis 7
+service containers, installs requirements.txt, runs Alembic migrations,
+runs the full pytest suite, on every push/PR to main. Couldn't dry-run this
+locally (no CREATEDB privilege on the dev Postgres role, sudo unavailable
+in this environment) -- pushed it and watched the actual first run instead
+(`gh run watch`), which is the real validation, not a local approximation:
+**36 passed, 6 skipped, 0 failed** in 57s. The 6 skips are exactly the
+tests that need real scraped data (test_idempotency.py,
+test_leaderboard.py's team-creation tests) against this CI DB (freshly
+migrated, no scraper run, so no players/coaches exist yet) -- expected and
+documented in the workflow file itself, not a surprise. CI badge added to
+README.md.
+
+All four of Fable's production-hardening items (4-7) are now done. What's
+NOT done from either review: team-level fantasy scoring aggregation (the
+biggest product-completeness gap, still blocked on players.position for
+the "real" version), crash-recovery for a fully-dead idempotency claim,
+and a `(user_id, league_id)` unique constraint on fantasy_teams.
+
 ## Suggested next steps, roughly in order
 
 1. Decide with the user which of Fable's findings to prioritize next --

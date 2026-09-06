@@ -14,6 +14,8 @@ this existed. `settings.redis_url` being unset (the default) means the same
 thing: this module is inert, every call is a guaranteed cache miss.
 """
 
+import asyncio
+import hashlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -26,20 +28,62 @@ logger = logging.getLogger(__name__)
 _client = None
 _client_initialized = False
 
+# Deduplicates concurrent cache misses for the SAME key within this process
+# (see get_or_compute_json). Entries are never removed -- unbounded growth
+# risk if the key space were huge, but it isn't here (a few dozen distinct
+# routes/param combinations, not per-user keys) -- acceptable, revisit if
+# that changes. Doesn't help across multiple worker processes; each has its
+# own dict, so a multi-worker deployment still sees per-process stampedes.
+_compute_locks: dict[str, asyncio.Lock] = {}
+
+
+def make_cache_key(prefix: str, **params: Any) -> str:
+    """
+    Builds a collision-safe cache key from named parameters. NOT naive string
+    interpolation with a separator like `f"{a}:{b}"` -- an independent review
+    (Codex) caught that a parameter value containing the separator itself
+    lets two DIFFERENT parameter combinations collide: with
+    `f"catalog:{search}:{club}"`, search="a:None:b",club="c" produces the
+    exact same string as search="a",club="b:None:c". Confirmed independently
+    before fixing.
+
+    JSON-encoding (sorted keys, so argument order never matters) and hashing
+    that instead makes every distinct combination of parameters produce a
+    distinct key regardless of what characters they contain.
+    """
+    canonical = json.dumps(params, sort_keys=True, default=str)
+    digest = hashlib.sha256(canonical.encode()).hexdigest()[:24]
+    return f"{prefix}:{digest}"
+
 
 def _get_client():
     """Lazy singleton -- constructing a redis client doesn't itself connect,
     so this is cheap to call on every request; the real failure mode (Redis
-    unreachable) is handled at GET/SET time below, not here."""
+    unreachable) is handled at GET/SET time below. Constructing the client
+    itself can ALSO fail synchronously (e.g. a malformed REDIS_URL raises
+    ValueError immediately, confirmed independently) -- caught here so that
+    failure degrades to "no cache" like every other failure mode in this
+    module, instead of propagating out of every caller."""
     global _client, _client_initialized
     if not _client_initialized:
-        _client_initialized = True
         if settings.redis_url:
-            import redis.asyncio as redis
+            try:
+                import redis.asyncio as redis
 
-            _client = redis.Redis.from_url(
-                settings.redis_url, socket_connect_timeout=1, socket_timeout=1, decode_responses=True
-            )
+                _client = redis.Redis.from_url(
+                    settings.redis_url, socket_connect_timeout=1, socket_timeout=1, decode_responses=True
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to construct a Redis client from REDIS_URL -- caching/rate limiting disabled",
+                    exc_info=True,
+                )
+                _client = None
+        # Only marked initialized AFTER the attempt (whether it succeeded or
+        # not), not before -- a construction failure means "stay disabled
+        # for this process's lifetime" (a malformed URL won't fix itself),
+        # not "retry every call".
+        _client_initialized = True
     return _client
 
 
@@ -78,10 +122,24 @@ async def get_or_compute_json(
     best-effort populate the cache for next time. `compute()`'s return value
     must be JSON-serializable (plain dicts/lists/primitives -- build these
     from Pydantic models with `.model_dump(mode="json")`, not the models
-    themselves)."""
+    themselves).
+
+    Concurrent misses for the SAME key are deduplicated within this process
+    (an independent review found 25 concurrent misses ran `compute()` 25
+    times without this) -- the first caller does the real work under a
+    per-key lock; everyone else waiting on that lock re-checks the cache
+    first (the first caller likely just populated it) before ever calling
+    compute() themselves.
+    """
     cached = await cache_get_json(key)
     if cached is not None:
         return cached
-    value = await compute()
-    await cache_set_json(key, value, ttl)
-    return value
+
+    lock = _compute_locks.setdefault(key, asyncio.Lock())
+    async with lock:
+        cached = await cache_get_json(key)
+        if cached is not None:
+            return cached
+        value = await compute()
+        await cache_set_json(key, value, ttl)
+        return value

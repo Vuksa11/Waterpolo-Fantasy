@@ -51,6 +51,27 @@ class UserOut(BaseModel):
     id: uuid.UUID
     email: str
     display_name: str
+    email_verified: bool
+
+
+class MessageOut(BaseModel):
+    detail: str
+
+
+class PasswordResetRequestIn(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmIn(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8, max_length=72)
+
+    @field_validator("new_password")
+    @classmethod
+    def password_bytes(cls, value):
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Password must not exceed 72 UTF-8 bytes")
+        return value
 
 
 class TokenOut(BaseModel):

@@ -19,6 +19,7 @@ Pipeline (per docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 4.2):
   6. Log the run to scrape_runs.
 """
 
+import logging
 import os
 from datetime import datetime
 
@@ -28,6 +29,19 @@ from scoring.engine import recompute_matchday_scores
 from scoring.price import recompute_prices_for_matchday
 from scraper.fetch_boxscore import fetch_boxscore
 from scraper.fetch_schedule import fetch_schedule
+
+# A standalone cron/systemd process, not part of the FastAPI app -- doesn't
+# share backend/app/core/logging_config.py (that's web-API-specific), just
+# configures its own logging the same simple way. Item #6 of an independent
+# review's (Fable) priority list specifically called this out: the scraper
+# is the platform's only connection to "the truth" about a match, and it
+# could previously fail silently -- `errors` was recorded in `scrape_runs`
+# but only ever printed to stdout, easy to miss in a cron job's output.
+# Logging at ERROR level when there were failures makes this visible in
+# whatever captures the process's stdout (systemd journal, cron mail, a
+# log aggregator later) without needing a real alerting pipeline yet.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 # (name, schedule_url) for each league this project actually tracks.
 # Super liga Srbije / Prva liga Srbije are not on totalwaterpolo.com -- the
@@ -90,9 +104,15 @@ def main() -> None:
         )
         session.commit()
 
-    print(f"Processed {matches_processed} matches, {len(errors)} errors.")
-    for e in errors:
-        print(f"  ERROR: {e}")
+    if errors:
+        logger.error(
+            "Scrape run finished with %d error(s) after processing %d match(es):\n%s",
+            len(errors),
+            matches_processed,
+            "\n".join(f"  - {e}" for e in errors),
+        )
+    else:
+        logger.info("Scrape run finished cleanly: %d match(es) processed, 0 errors.", matches_processed)
 
 
 if __name__ == "__main__":

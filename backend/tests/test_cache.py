@@ -97,3 +97,64 @@ async def test_redis_failure_falls_back_to_compute(fake_redis_client, monkeypatc
 
     result = await cache_module.get_or_compute_json("test:broken", compute, ttl=30)
     assert result == {"ok": True}
+
+
+async def test_make_cache_key_does_not_collide_on_separator_characters():
+    """An independent review (Codex) caught that the old naive
+    f"{search}:{club}" key format let two DIFFERENT filter combinations
+    collide when a value contained the ":" separator itself: confirmed
+    search="a:None:b",club="c" produced the exact same key as
+    search="a",club="b:None:c". make_cache_key must not have this problem."""
+    key_a = cache_module.make_cache_key("catalog", search="a:None:b", position=None, club="c")
+    key_b = cache_module.make_cache_key("catalog", search="a", position=None, club="b:None:c")
+    assert key_a != key_b, "different filters must never produce the same cache key"
+
+    # Same params (any order) -> same key, so it's still actually usable as a cache.
+    key_c = cache_module.make_cache_key("catalog", club="c", position=None, search="a:None:b")
+    assert key_a == key_c
+
+
+async def test_get_client_falls_back_on_invalid_redis_url(monkeypatch):
+    """An independent review (Codex) caught that _get_client() constructed
+    the Redis client OUTSIDE any try/except, so a malformed REDIS_URL raised
+    ValueError synchronously and propagated straight out of
+    get_or_compute_json -- the opposite of every other failure mode in this
+    module, which degrades to a cache miss instead of crashing the request."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "redis_url", "invalid://not-a-real-scheme")
+    cache_module._client = None
+    cache_module._client_initialized = False
+    try:
+        calls = 0
+
+        async def compute():
+            nonlocal calls
+            calls += 1
+            return {"ok": True}
+
+        result = await cache_module.get_or_compute_json("test:invalid-url", compute)
+        assert result == {"ok": True}
+        assert calls == 1, "must fall through to compute(), not raise"
+    finally:
+        cache_module._client = None
+        cache_module._client_initialized = False
+
+
+async def test_concurrent_cache_misses_compute_once(fake_redis_client):
+    """An independent review (Codex) found 25 concurrent callers with a cold
+    cache all ran compute() themselves (25 DB round-trips instead of 1) --
+    get_or_compute_json must deduplicate concurrent misses for the same key
+    within this process."""
+    calls = 0
+
+    async def slow_compute():
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.05)
+        return {"value": "computed-once"}
+
+    results = await asyncio.gather(*[cache_module.get_or_compute_json("test:stampede", slow_compute) for _ in range(25)])
+
+    assert calls == 1, f"compute() should run exactly once for 25 concurrent misses, ran {calls} times"
+    assert all(r == {"value": "computed-once"} for r in results)

@@ -116,6 +116,17 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
+    # Not gated on login yet -- there's no real email provider wired up
+    # (see app/core/email.py), so enforcing "must verify before login"
+    # would lock every user out with no way to actually receive the link.
+    # The mechanism is complete; the gate is a one-line addition once a
+    # real provider exists.
+    email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    email_verification_token: Mapped[str | None] = mapped_column(String, unique=True)
+    email_verification_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    password_reset_token: Mapped[str | None] = mapped_column(String, unique=True)
+    password_reset_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
 
 class Competition(Base):
     """One of the three real-world leagues: Regionalna liga, Super liga Srbije, Prva liga Srbije."""

@@ -117,11 +117,11 @@ async def _clear_leaderboard_cache(competition_id: uuid.UUID, limit: int = 50, o
     asserting removes that flakiness without weakening what's tested -- the
     cache-hit path itself is already covered by backend/tests/test_cache.py.
     """
-    from app.core.cache import _get_client
+    from app.core.cache import _get_client, make_cache_key
 
     client = _get_client()
     if client is not None:
-        await client.delete(f"leaderboard:v1:{competition_id}:{limit}:{offset}")
+        await client.delete(make_cache_key("leaderboard:v2", competition_id=competition_id, limit=limit, offset=offset))
 
 
 async def test_leaderboard_includes_created_team(client, team_fixture):

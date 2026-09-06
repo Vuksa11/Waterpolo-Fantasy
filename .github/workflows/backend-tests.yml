@@ -1,0 +1,74 @@
+name: Backend tests
+
+# Item #7 of an independent review's (Fable) priority list: the test suite
+# existed and was good, but nothing ran it automatically -- relied on
+# someone remembering to run `pytest` by hand before merging. Deliberately
+# the simple version Codex's own review suggested ("even the simplest
+# GitHub Actions workflow that runs the existing pytest suite") rather than
+# something elaborate.
+#
+# Known limitation, not an oversight: tests that need real scraped data
+# (backend/tests/test_idempotency.py, test_leaderboard.py's team-creation
+# tests) `pytest.skip()` themselves when the dev DB has none -- this CI DB
+# starts empty (just migrated, no scraper run), so those specific tests
+# report as skipped here, not passed. Everything else (auth flows, cache,
+# rate limiting, the 404/validation paths) runs for real. Seeding minimal
+# synthetic data so those skip-only tests actually execute in CI is a
+# reasonable follow-up, not done here to keep this first version simple.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: waterpolo
+          POSTGRES_PASSWORD: waterpolo
+          POSTGRES_DB: waterpolo_fantasy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://waterpolo:waterpolo@localhost:5432/waterpolo_fantasy
+      DATABASE_URL_SYNC: postgresql+psycopg2://waterpolo:waterpolo@localhost:5432/waterpolo_fantasy
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Alembic migrations
+        run: python -m alembic upgrade head
+        working-directory: backend
+
+      - name: Run backend test suite
+        run: python -m pytest -v
