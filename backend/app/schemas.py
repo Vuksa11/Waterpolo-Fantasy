@@ -8,7 +8,7 @@ matches, matchdays. See docs/Fantasy_Waterpolo_Arhitektura_v2.md, Section 7.
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, computed_field, field_validator
 
 # bcrypt hashes only the first 72 bytes of its input and raises ValueError on
 # anything longer (confirmed: this is a hard C-library limit, not something
@@ -218,6 +218,25 @@ class MatchdaySummary(BaseModel):
     number: int
     status: str
     deadline: datetime | None
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def display_label(self) -> str:
+        """
+        `number` is a scraper-internal sort key ONLY (see
+        scraper/db_writer.py's _round_number docstring) -- regular rounds get
+        their real round number, but playoff rounds (Semifinal, Final, ...)
+        get large fixed offsets (9000+) purely so they sort after the regular
+        season without colliding with each other. That was never meant to be
+        shown to a user, but nothing in this schema said so before this field
+        existed, and a real check of the live frontend caught it rendering a
+        literal "9300 KOLO" for a Final matchday. This always returns
+        something presentable: the plain round number as a string for a
+        normal round, or the round's own label ("Final", "Semifinal", ...)
+        for anything else.
+        """
+        tail = self.label.split()[-1] if self.label else ""
+        return tail if tail.isdigit() else self.label
 
 
 class HomeOut(BaseModel):
