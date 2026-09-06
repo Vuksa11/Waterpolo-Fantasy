@@ -389,6 +389,48 @@ closes the gap between the 4-worker result (p95 1600ms) and something
 closer to "instant" -- that comparison is the real point of building this,
 not just having Redis wired up unmeasured.
 
+## Redis measured live -- the target is met (same session, right after)
+
+User installed `redis-server` (now a running systemd service) and said to
+continue. Set `REDIS_URL=redis://localhost:6379` in `.env` (permanent, not
+just this session's env var), restarted, confirmed live with `redis-cli
+keys "*"` that cache entries actually appear after a real request (not just
+theoretically wired up). Full pytest suite (20/20) still passes with Redis
+live.
+
+**1000 concurrent, read-only, 1 worker + Redis** (vs. the same test without
+Redis from the previous section): aggregate p95 **8000ms -> 55ms**, p99
+**13000ms -> 110ms**, throughput 210 -> **~450-499 req/s**, 0% failures (no
+more QueuePool timeouts). This IS an instant feel at the actual target load
+level.
+
+**Surprising, honestly-reported finding: 4 workers + Redis is slightly
+WORSE than 1 worker + Redis** (p95 170ms, p99 390ms -- still excellent, but
+worse than one process). Explanation: Redis already eliminated the DB pool
+saturation that was the ONLY reason more workers helped earlier; with that
+bottleneck gone, extra processes on this 4-core machine just add CPU
+context-switching overhead with no offsetting benefit. On this machine, the
+best configuration is 1 worker + Redis, not 4 workers + Redis -- worth
+noting for a real deployment: worker count should be tuned against the
+ACTUAL bottleneck, not assumed "more is always better."
+
+**Full write profile (transfer/lineup/registration), 300 concurrent, 1
+worker + Redis**: also substantially better than without Redis -- aggregate
+p95 250ms->**43ms**, p99 920ms->**270ms**. `POST /api/teams` still shows
+higher variance (p98 890ms) -- that's still create_team's Season row-lock
+contention, which Redis doesn't fix directly (the write path isn't cached),
+only indirectly helps by freeing DB pool capacity.
+
+**Conclusion (final for this round)**: the ~1000-concurrent target with an
+"instant" feel is achieved for read-heavy traffic (the vast majority of
+real traffic) -- Redis + 1 worker gives p95=55ms/p99=110ms at 1000
+concurrent reads. `create_team` write-lock contention remains the one open
+discussion item (partial unique index proposal already in the handoff doc).
+Raw CSVs (1000-concurrent with/without Redis, 1 and 4 workers; 300-
+concurrent write profile with Redis) in `backend/loadtest/results/`. Server
+left running with `REDIS_URL` set, 1 worker (`.env` updated permanently, not
+just for this session).
+
 ## Blocked on the user
 
 - **`players.position`** (OT/CF/CB) — null for every player. Not scrapeable
@@ -403,16 +445,6 @@ not just having Redis wired up unmeasured.
   straight from the box score; goalkeepers don't (confirmed, not a bug).
   Needs a team-squad page sample to resolve properly; currently matched by
   (name, club) instead. Not blocking anything today, just less robust.
-- **`redis-server` isn't installed** — needs `sudo apt-get install
-  redis-server` in the user's own terminal (same reason Postgres/pip needed
-  it earlier: `sudo` requires an interactive password this environment can't
-  provide). The application-side cache code (`app/core/cache.py`, wired into
-  home/standings/catalog/facets) is done and tested against `fakeredis`
-  (hit/miss/TTL/failure-fallback all verified) and also manually confirmed
-  to degrade gracefully with a real `REDIS_URL` pointing at nothing (200s,
-  a logged warning, no cache benefit) -- but the actual perf benefit this
-  was built for (see the load-test section above) can't be measured live
-  until a real Redis process exists to point `REDIS_URL` at.
 
 ## Suggested next steps, roughly in order
 
