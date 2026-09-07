@@ -431,16 +431,107 @@ concurrent write profile with Redis) in `backend/loadtest/results/`. Server
 left running with `REDIS_URL` set, 1 worker (`.env` updated permanently, not
 just for this session).
 
-## Blocked on the user
+## `players.position` and real coach names — RESOLVED (2026-09-07)
 
-- **`players.position`** (OT/CF/CB) — null for every player. Not scrapeable
-  (confirmed absent from the match box-score page). The user said they'll
-  send a reference file. This blocks: lineup/formation validation, and the
-  frontend's team-builder (which correctly disables buying any player until
-  this exists).
-- **Real coach names** — every club currently has one generic placeholder
-  `Coach` row (name suffixed "— trener TBD"). Same file as positions, per the
-  user.
+No longer blocked. The user manually annotated `players.position` for
+almost every scraped player (reference file `~/Downloads/rosteri2.0.txt`,
+17 clubs, 352 players) and supplied real coach names for 7 clubs. Applied
+to the DB:
+
+- **348 of 352 players now have a real `position`** (`GK`/`OT`/`CF`/`CB`).
+  4 remain `NULL`, intentionally, because there is no reliable way to
+  resolve them: 2 are the known unnamed-goalkeeper placeholder rows (name
+  `"- -"`, Primorac and Šabac Elixir — pre-existing, documented issue, see
+  the goalkeeper-stable-ID note below), and 2 (`Samuil Tsvetanov Ivanov` at
+  Radnički, `Nemanja Ilić` at Nais Niš) were left without a position
+  annotation by the user in the source file — not guessed, flagged instead.
+- **Cattaro** (23 players) had zero position annotations in the source
+  file. Per the user's explicit instruction, positions were assigned by
+  hand to mirror the position mix of the other 16 clubs (roughly OT 57%,
+  GK 16%, CB 16%, CF 10%): GK=3, OT=13, CB=4, CF=3. This is **not**
+  researched/real data — it's a deliberate placeholder assignment, done
+  only because the user asked for one; worth revisiting if a real Cattaro
+  roster/position source ever turns up.
+- **Duplicate same-name rows**: several clubs have two distinct `Player`
+  rows sharing one name (e.g. two "Matija Vlahovic" rows at Crvena Zvezda).
+  In every case but Cattaro's, the user's file gave a position to exactly
+  one occurrence and left the other blank — both DB rows were set to that
+  same position, since there's no way to tell which physical row is which.
+- **Coach names**: 13 of 17 clubs now have a real `Coach.name` (round 1: 8,
+  round 2 same day added 5 more after the user asked for a deeper, more
+  thorough search). 7 came straight from the user's file (NBG Tehnomanija:
+  Zoran Bajić, Partizan: Stefan Ćirić, Radnički: Uroš Stevanović, Šabac
+  Elixir: Nemanja Ličanin, Beograd: Nikola Milosavljević, NBG Vukovi: Nenad
+  Vasilovski, Valis Vega: Miloš Saković). The other 6 came from web
+  research, each cross-checked before being trusted:
+  - **Jadran m:tel HN → Petar Radanović** — pvkjadran.com's official squad
+    page; 7 of 15 scraped roster names (Danilo Stupar, Dmitri Kholod, Ilija
+    Radovic, Jovan Vujovic, Matija Sladovic, Strahinja Gojkovic, Vasilije
+    Radovic) match exactly.
+  - **Budućnost One → Aleksandar Aleksić** — pvkbuducnost.me's coverage of
+    "PVK Budućnost" (Podgorica); 13 of 22 scraped roster names matched its
+    published squad — the strongest cross-check of this whole round.
+  - **Primorac → Anastasios (Sakis) Kehajas** — reported by 4 independent
+    Montenegrin outlets (RTCG, CDM, aktuelno.me, gradski.me), appointed 24
+    June 2025, replacing Vjekoslav Pasković. No roster to cross-check, but
+    corroborated by multiple outlets with a specific date.
+  - **Budva BDR → Miloš Popović** — December 2025 Cup-of-Montenegro final
+    four coverage that also named Primorac, Budućnost One, and Jadran m:tel
+    as the other 3 semifinalists — exactly our own club list, strong
+    contextual confirmation.
+  - **Vojvodina → Darko Bilić** — consistent across multiple 2025 sources
+    (uvts.rs coach registry, vaterpolovesti.com, a September 2025 tournament
+    mention).
+  - **Zemun → Andrija Vasiljević** — official club site (vkzemun.org.rs),
+    both its "Stručni štab" and "Prvi tim 2025-2026" pages; cross-checked
+    via player "Milan Bulajić" appearing on both the official roster and our
+    own scraped one. **Side note surfaced by this check, not acted on**: the
+    official site lists Aleksa Damjanović at jersey #13 (a GK number), while
+    the user's file marked him "OT" — flagged, not silently overridden,
+    since the user's manual position annotation was treated as the source of
+    truth this round.
+  Still left as TBD after a genuinely thorough search (not guessed):
+  - **Crvena Zvezda** — actively coachless per multiple 2026 news reports:
+    coach Aleksandar Filipović left mid-season (too few players showing up
+    to training), separate reports describe the club in serious financial
+    trouble. There's no stable coach to name right now.
+  - **Cattaro (VA Cattaro)** — a "new season" presentation names 4 people
+    (Mlađan Tujković, Željko Vičević, Nebojša Milić, Ivan Bjelobrković) with
+    no indication which one is the sole head coach — reads as a multi-coach
+    academy staff, not a single-name role. Left blank rather than pick one
+    at random.
+  - **Nais Niš** — every source found (several search phrasings tried) was
+    stale (2015–2018) or silent on 2025/26.
+  - **Stari Grad** — confirmed former coach Zoran Mijalkovski left for Novi
+    Beograd (Feb 2026, total-waterpolo.com's own news post), but no
+    successor was found anywhere.
+- Investigated the two "- -" unresolved-name player rows (Primorac,
+  Šabac Elixir) at the user's request, since the working assumption in this
+  doc and in `player_resolver.py`'s docstring was that these were
+  goalkeepers without a stable id. **That assumption was wrong for these two
+  specific rows** — rendered the actual match pages via the existing
+  Playwright scraper (`fetch_boxscore.render_match_page`, matches 12534 and
+  12536) and found both are jersey **#16 FIELD players** (not goalkeepers,
+  `#homePlayers`/`#awayPlayers` section, not `#...Goalkeepers`), each with a
+  perfectly stable `external_player_id` (11670 and 4603) from a normal
+  `OpenPlayerPage(...)` onclick. Also loaded each player's own profile page
+  on the source site (`total-waterpolo.com/tw_player/11670` and `/4603`) —
+  both show the name field itself as literally "- -", with every other bio
+  field (position/hand/height/weight) blank too, and both play in
+  youth-adjacent competitions (U-15 Montenegro Cup, etc.) alongside VRL
+  Premier. **Conclusion: this is a real data gap on totalwaterpolo.com
+  itself** (the site never published these two young players' names), not a
+  scraper bug and not something further searching can fix — left as `NULL`
+  name is already correct behavior, no code or data change needed. Also
+  checked whether total-waterpolo.com exposes coach data anywhere (a
+  `tw_team/{id}` profile page pattern exists and was tried for several
+  clubs) — confirmed it does not; the whole "coach names" search had to be
+  general web research for this reason.
+- Full test suite re-run after applying: 42 passed, 0 failed.
+- Unblocks: `save_lineup`'s formation validation and the frontend
+  team-builder's "Nedostaje potvrđena pozicija" disabled state now have
+  real data to work against for 348/352 players.
+
 - **Goalkeeper stable IDs** — field players get a stable external id
   straight from the box score; goalkeepers don't (confirmed, not a bug).
   Needs a team-squad page sample to resolve properly; currently matched by
@@ -475,11 +566,10 @@ Critical findings (blocking "real fantasy product," not code-quality bugs):
 2. **No fantasy leaderboard** -- FIXED same session, see the commit above
    (`GET /api/competitions/{id}/leaderboard`, correct in shape today, will
    show real numbers once #1 is built).
-3. **`players.position` still null for every player** -- known, honestly
-   documented, blocked on the project owner's reference file. Named
-   explicitly here because its real consequence is that "API mode" is
-   currently a read-only demo, not an end-to-end playable game, since
-   `save_lineup` correctly rejects every real roster.
+3. **`players.position` still null for every player** -- RESOLVED
+   2026-09-07, see "`players.position` and real coach names — RESOLVED"
+   above: 348/352 players now have a real position, unblocking
+   `save_lineup`'s formation validation for almost the entire dataset.
 4. **No rate limiting / brute-force protection on auth** -- confirmed live:
    15 consecutive wrong-password attempts against the same account all
    returned a clean 401, no 429, no lockout, no CAPTCHA. bcrypt's own cost
