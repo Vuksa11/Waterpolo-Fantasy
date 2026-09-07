@@ -215,7 +215,7 @@ function squadList() {
 }
 function bench() {
   const list = draft.roster.filter((p) => !draft.active.includes(p.id));
-  return `<section class="card bench-card"><div class="card-head"><div><div class="eyebrow">KLUPA I STRUČNI ŠTAB</div><h3>Rezerve</h3></div><span class="pill">${list.length} igrača + ${draft.coach ? "1 trener" : "trener"}</span></div><div class="bench-grid"><button class="bench-slot coach" id="coach"><span class="role-tag">TRENER</span><span class="player-circle">${draft.coach ? "T" : "+"}</span><b>${esc(draft.coach?.name || "Izaberi trenera")}</b><small>${draft.coach ? money(draft.coach.current_cost) + " kr" : "Čeka potvrđene podatke"}</small></button>${list.map((p) => `<button class="bench-slot" data-bench="${esc(p.id)}"><span class="role-tag">${p.position || "?"}</span><span class="player-circle">${short(p.name)}</span><b>${esc(p.name)}</b><small>${esc(p.real_club)} · ${money(p.current_cost)} kr</small></button>`).join("")}${Array.from({ length: Math.max(0, 4 - list.length) }, (_, i) => `<button class="bench-slot" data-go="players"><span class="role-tag">REZERVA</span><span class="player-circle">+</span><b>Izaberi igrača</b><small>GK · CF/CB · OT · OT</small></button>`).join("")}</div></section>`;
+  return `<section class="card bench-card"><div class="card-head"><div><div class="eyebrow">KLUPA I STRUČNI ŠTAB</div><h3>Rezerve</h3></div><span class="pill">${list.length} igrača + ${draft.coach ? "1 trener" : "trener"}</span></div><div class="bench-grid"><button class="bench-slot coach" id="coach"><span class="role-tag">TRENER</span><span class="player-circle">${draft.coach ? "T" : "+"}</span><b>${esc(draft.coach?.name || "Izaberi trenera")}</b><small>${draft.coach ? money(draft.coach.current_cost) + " kr" : "Otvori izbor trenera"}</small></button>${list.map((p) => `<button class="bench-slot" data-bench="${esc(p.id)}"><span class="role-tag">${p.position || "?"}</span><span class="player-circle">${short(p.name)}</span><b>${esc(p.name)}</b><small>${esc(p.real_club)} · ${money(p.current_cost)} kr</small></button>`).join("")}${Array.from({ length: Math.max(0, 4 - list.length) }, (_, i) => `<button class="bench-slot" data-go="players"><span class="role-tag">REZERVA</span><span class="player-circle">+</span><b>Izaberi igrača</b><small>GK · CF/CB · OT · OT</small></button>`).join("")}</div></section>`;
 }
 function team() {
   if (teamLoading) return loadingCards("Učitavam tvoj sačuvani tim…");
@@ -226,12 +226,22 @@ function team() {
   )
     return "";
   const f = FORMATIONS[draft.formation];
+  const day = currentDay();
+  const windowNotice =
+    mode === "api" &&
+    dataStates.days === "ready" &&
+    (!day ||
+      day.status !== "UPCOMING" ||
+      !day.deadline ||
+      !(new Date(day.deadline) > new Date()))
+      ? '<p class="validation" role="status">Nema otvorenog kola sa važećim rokom za izabranu postavu. Možeš uređivati lokalni nacrt; čuvanje postave na serveru čeka otvoreno kolo.</p>'
+      : "";
   return `<section class="team-banner"><div class="round-number">${esc(roundTitle(currentDay()).title)}<small>${roundTitle(currentDay()).caption}</small></div><div><span class="hero-pill">${mode === "demo" ? "DEMO SASTAV" : serverTeam ? "TIM NA SERVERU" : "LOKALNI NACRT"}</span><h1>Tim ${esc(draft.name)}</h1></div><div class="deadline-copy"><span>Zaključavanje sastava</span><strong>${currentDay()?.deadline ? new Date(currentDay().deadline).toLocaleString("sr-Latn", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "Rok nije objavljen"}</strong></div></section><div class="team-layout"><aside class="team-summary card"><div class="card-head"><h3>Pregled tima</h3><button class="text-link" id="rename" aria-label="Promeni ime tima">✎</button></div><div class="summary-content"><h2>${esc(draft.name)}</h2><label class="eyebrow">FORMACIJA</label>${formControl()}<p class="formation-description">${f.description}</p><div class="gauge-head"><b>Krediti</b><span>${money(100 - budget())} / 100</span></div><div class="gauge"><i style="width:${Math.min(100, 100 - budget())}%"></i></div><div class="sub">${money(budget())} kredita za pojačanja</div><div class="summary-stats"><div><span>Igrači</span><strong>${draft.roster.length}/11</strong></div><div><span>Kapiten</span><strong>${esc(
     draft.roster
       .find((p) => p.id === draft.captain)
       ?.name.split(" ")
       .at(-1) || "—",
-  )}</strong></div></div><button class="primary full" id="save-lineup" ${busy ? "disabled" : ""}>${busy ? "Proveravam…" : mode === "demo" ? "Sačuvaj demo sastav" : "Sačuvaj sastav"}</button><p class="sub">7 startera + 4 rezervna igrača + trener.</p>${draft.savedAt ? `<p class="saved-at">✓ ${mode === "api" && serverTeam ? "Server" : "Lokalno"} · sačuvano ${new Date(draft.savedAt).toLocaleTimeString("sr-Latn", { hour: "2-digit", minute: "2-digit" })}</p>` : ""}${errorsView()}</div></aside><section class="card pool-card"><div class="card-head"><h3>${f.label} · ${f.name}</h3><span class="tiny">C = KAPITEN</span></div><div class="squad-toolbar"><div class="view-switch" role="group" aria-label="Prikaz tima"><button data-view="pool" aria-pressed="${squadView === "pool"}">▦ Bazen</button><button data-view="list" aria-pressed="${squadView === "list"}">☷ Lista</button></div><span class="tiny">Klikni na igrača za zamenu</span></div>${squadView === "pool" ? pool() : squadList()}<div class="card-foot pool-legend">GK Golman &nbsp; OT Spoljni &nbsp; CF Centar &nbsp; CB Bek</div></section>${bench()}<aside class="right-rail"><section class="card"><div class="card-head"><h3>Sledeći izazov</h3><span class="hero-pill small">VRL</span></div>${fixtureRows(matches.slice(0, 1))}</section><section class="card"><div class="card-head"><h3>Tvoj roster</h3><button class="text-link" data-go="players">Transferi ↗</button></div>${
+  )}</strong></div></div><button class="primary full" id="save-lineup" ${busy ? "disabled" : ""}>${busy ? "Proveravam…" : mode === "demo" ? "Sačuvaj demo sastav" : "Sačuvaj sastav"}</button><p class="sub">7 startera + 4 rezervna igrača + trener.</p>${windowNotice}${draft.savedAt ? `<p class="saved-at">✓ ${mode === "api" && serverTeam ? "Server" : "Lokalno"} · sačuvano ${new Date(draft.savedAt).toLocaleTimeString("sr-Latn", { hour: "2-digit", minute: "2-digit" })}</p>` : ""}${errorsView()}</div></aside><section class="card pool-card"><div class="card-head"><h3>${f.label} · ${f.name}</h3><span class="tiny">C = KAPITEN</span></div><div class="squad-toolbar"><div class="view-switch" role="group" aria-label="Prikaz tima"><button data-view="pool" aria-pressed="${squadView === "pool"}">▦ Bazen</button><button data-view="list" aria-pressed="${squadView === "list"}">☷ Lista</button></div><span class="tiny">Klikni na igrača za zamenu</span></div>${squadView === "pool" ? pool() : squadList()}<div class="card-foot pool-legend">GK Golman &nbsp; OT Spoljni &nbsp; CF Centar &nbsp; CB Bek</div></section>${bench()}<aside class="right-rail"><section class="card"><div class="card-head"><h3>Sledeći izazov</h3><span class="hero-pill small">VRL</span></div>${fixtureRows(matches.slice(0, 1))}</section><section class="card"><div class="card-head"><h3>Tvoj roster</h3><button class="text-link" data-go="players">Transferi ↗</button></div>${
     draft.roster
       .slice(0, 5)
       .map(
@@ -830,7 +840,7 @@ async function saveLineup() {
   if (
     mode === "api" &&
     (!currentDay()?.deadline ||
-      new Date(currentDay().deadline) <= new Date() ||
+      !(new Date(currentDay().deadline) > new Date()) ||
       currentDay().status !== "UPCOMING")
   ) {
     toast(
@@ -906,7 +916,7 @@ function coachModal() {
     return;
   }
   modal(
-    `<h2>Izaberi trenera</h2><p>Imena sa oznakom TBD su privremeni zapisi iz baze.</p><div class="pick-list">${coaches.map((c) => `<button class="pick-row" data-coach="${c.id}"><span><b>${esc(c.name)}</b><small>${esc(c.real_club)}</small></span><b>${money(c.current_cost)} kr</b></button>`).join("") || '<div class="empty">Nema trenera u bazi.</div>'}</div>`,
+    `<h2>Izaberi trenera</h2><p>Oznaka (mock) znači da je ime trenera izmišljeno za testiranje; TBD znači da ime još nije uneto.</p><div class="pick-list">${coaches.map((c) => `<button class="pick-row" data-coach="${c.id}"><span><b>${esc(c.name)}</b><small>${esc(c.real_club)}</small></span><b>${money(c.current_cost)} kr</b></button>`).join("") || '<div class="empty">Nema trenera u bazi.</div>'}</div>`,
   );
   $$("[data-coach]").forEach(
     (b) =>

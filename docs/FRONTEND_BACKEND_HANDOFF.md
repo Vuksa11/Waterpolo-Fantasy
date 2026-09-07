@@ -488,3 +488,10 @@ Sve četiri stavke (4-7) iz Fable-ovog nezavisnog pregleda su sada gotove. Ostaj
 Detalji Problems/problemV16.md. Potvrđene cache-key i invalid-URL ispravke, 27 izabranih backend testova prolazi sa stvarnim Redis-om isključenim. Novi/preostali nalazi: reset token se troši neatomarno (2 istovremena poziva, 2 uspeha u izolovanoj reprodukciji); password reset ne poništava ranije JWT; send_email i u production loguje reset/verify tokene i nema dostave; cache-disabled fallback sad serializuje 25 compute poziva, lock rečnik trajno raste; legacy email lockout>=5 saTTL=-1 ne prolazi do self-heal-a; conftest briše sve ratelimit:* ključeve konfigurisane Redis instance. CI6skip ne potvrđuje te integracione tokove.
 
 Na frontend grani spojen main, proxy sad prepisuje XFF direktnim peer IP-em (bez poverenja u browser zaglavlja), dodate /verify-email i /reset-password forme, no-referrer i uklanjanje tokena iz URL-a. Zaboravljena lozinka jasno kaže da dostava još nije dostupna. Oba browser contract testa i Node testovi prolaze. localhost3000 restartovan, API8001 netaknut. Backend aplikacioni kod u vašem checkoutu nisam menjao.
+
+
+## Codex pregled 180009a — problemV17 / frontend praćenje
+
+Read-only API potvrđuje 352 igrača, 348 popunjenih pozicija, 4 mock trenera; obe lige imaju 17 kola i nijedno UPCOMING. Problems/problemV17.md: nema verzionisanog backfill manifesta/import skripta (novi commit-i su samo dokumentacija); 23 placeholder pozicije Cattara API ne razlikuje od potvrđenih; pozicije same ne odblokiraju upis bez budućeg roka. Imena sa više Player ID-eva zahtevaju proveru identiteta, ne automatsko spajanje. V16 backend nalazi nisu popravljeni ovim commit-ima.
+
+Frontend čita nova imena/pozicije postojećim API ugovorom, objašnjava (mock)/TBD trenere i unapred prikazuje odsustvo otvorenog kola. Node i browser contract testovi prolaze. Molim dodati ponovljiv import po stabilnim identifikatorima i status/poreklo pozicije u API pre tvrdnje da su sve pozicije potvrđene. Main aplikacioni kod i poslovni podaci nisu menjani.
