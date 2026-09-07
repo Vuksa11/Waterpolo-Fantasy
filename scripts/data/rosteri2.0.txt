@@ -1,0 +1,414 @@
+NAPOMENA (procitaj pre popunjavanja pozicija/trenera):
+1. Primorac i Sabac Elixir imaju red "- -" -- to su verovatno golmani bez razresenog imena
+   (poznato ogranicenje: golmani nemaju stabilan spoljni ID sa sajta, ceka se uzorak
+   stranice sa sastavom tima da se to reesi).
+2. Dosta imena se ponavlja unutar istog kluba (npr. "Matija Vlahovic" 2x kod Crvene zvezde,
+   "Danilo Rajevic" 2x kod Partizana) -- moglo bi biti stvarno dva razlicita igraca istog
+   imena, ili artefakt scrapinga. Nije istrazeno dalje, javi ako treba da se proveri.
+
+Format: naziv ekipe / trener / igraci (jedan po redu) / prazan red / sledeca ekipa.
+
+===================================================================
+
+Budućnost One
+Budućnost One — trener TBD
+Andrej  Andrić - OT?
+Andrej Golubovic - OT?
+Andrija Aleksic - OT?
+Balsa Scepanovic - GK
+Danilo Savovic - OT?
+Darko Brguljan - OT
+David Stevovic - OT
+Dragan Kolesko - GK
+Jaksa Milanovic - OT
+Jovan Radulovic - CB
+Marko Bošković - OT
+Mihailo Raicevic - OT
+Nikola Petrovic - OT
+Nikola Strkalj - CB
+Petar Brnovic - CB
+Reuel Mark D'Souza - OT
+Sandro Adeishvili - CF
+Sava Stamatovic - OT?
+Uros Milic - OT?
+Veljko Raznatovic  CB
+Vucina Popovic - OT?
+Vuk Lazarevic - OT?
+
+Crvena Zvezda
+Crvena Zvezda — trener TBD
+Aleksandar Marković - CB
+Aleksandar Radanović - OT
+Aleksa Popovic - CB
+Dorde Zivkovic - OT
+Dusan Markovic - CB
+Dusan Vasic - OT
+Kristijan Sulc - OT
+Luka Cikaric - OT
+Marko Petkovic - OT
+Marko Radovic - OT
+Matija Vlahovic - GK
+Matija Vlahovic
+Nikola Nikolov - CF
+Petar Kasum - OT
+Petar Smiljević - OT
+Relja Dankovic - OT
+Rodoljub Gajić - OT
+Stefan Gak - CB
+Stefan Pjesivac - CF
+Veljko Krstić - OT
+Veljko Tankosic - OT
+Viktor Savić - GK
+Vladimir Misovic - GK
+Vuk Vitorović - CB
+
+Jadran m:tel HN
+Jadran m:tel HN — trener TBD
+Daniil Merkulov - CB
+Danilo Stupar - OT
+Dimitrije Obradovic - CB
+Djordje Lazic - CF
+Dmitri Kholod - OT
+Fran Valera - OT
+Ilija Radovic - GK
+Jovan Vujovic - CF
+Lazar Andric - GK
+Matija Sladovic - CB
+Srdjan Janovic - OT
+Stefan Vranes - OT
+Strahinja Gojkovic - OT
+Tadija Matijasevic - OT
+Vasilije Radovic - CB
+
+NBG Tehnomanija
+NBG Tehnomanija — trener TBD - Zoran Bajić
+Aleksa Ukropina - OT
+Djuro Radovic - OT
+Dusan Trtovic - CB
+Filip Coric - OT
+Filip Jankovic - OT
+Goran Grgurevic - CF
+Luka Gladovic - OT
+Luka Pljevancic - CB
+Marko Dimitrijevic - OT
+Milan Glusac - GK
+Milan Glusac
+Milos Cuk - CB
+Miroslav Perkovic - CF
+Nikola Lukic - OT
+Pavle Gavrilovic - GK
+Petar Pajkovic - GK
+Petar Pajkovic
+Petar Vujosevic - CB
+Sawyer Joseph Rhodes - OT?
+Vasilije Martinovic - OT
+Viktor Urosevic - OT
+Vuk Milojevic - OT
+
+Partizan
+Partizan — trener TBD - Stefan Ćirić
+Aleksandar Ilic - OT
+Andrej Durutovic - OT
+Danilo Rajevic - GK
+Danilo Rajevic
+David Dimković - GK
+David Dimković
+Jayden Cutajar - OT
+Kosta Bodiroga - OT
+Lazar Stepanovic - OT
+Luigi Canepa - OT
+Luka Dimić - OT
+Mihajlo Janosevic - OT
+Miljan Đokanović - OT
+Nikola Radulovic - CB
+Ognjen Ilic - CB
+Pavle Papic - OT
+Strahinja Nešković - OT
+Uroš Adamović - CB
+Veljko Bodiroga - CF
+Vuk Andelic - OT
+Vuk Čonkić - CF
+Zoran Bozovic - CB
+
+Primorac
+Primorac — trener TBD
+- -
+Arsenii Chumakov - GK
+Balsa Vuckovic - OT
+Danilo Roganovic - CF
+Dimitrije Risticevic - GK
+Djordjije Stanojević - OT
+Drasko Brguljan - CB
+Draško Samardžić - OT
+Luka Murisic - OT
+Marko Mrsic - OT
+Marko Pejovic - OT
+Nemanja Vico - CF
+Nikola Brkic - CB
+Petar Cetkovic - CB
+Savo Cetkovic - CF
+Stefan Vidovic - OT
+Tim Perov - OT
+Yusuke Inaba - OT
+
+Radnički
+Radnički — trener TBD - Uroš Stevanović
+Andrija Prlainovic - OT
+Andrija Stanarević - OT
+Angelos Vlachopoulos - OT
+Bea Peter Tainui Fountain - GK
+Boris Vapenski - OT
+Dusko Pijetlovic - CF
+Jovan Gudurić - OT
+Jovan Simović - OT
+Nikola Dedović - OT
+Nikola Jaksic - CB
+Nikola Murisic - CF
+Petar Jaksic - CB
+Radoslav Filipovic - GK
+Samuil Tsvetanov - OT
+Samuil Tsvetanov Ivanov
+Sava Randjelovic - CB
+Stefan Todorovski - GK
+Strahinja Rasovic - OT
+Valiko Dadvani - CB
+Veljko Doncic  CF
+Viktor Rasovic - OT
+
+Šabac Elixir
+Šabac Elixir — trener TBD - Nemanja Ličanin 
+- -
+Aleksandar Kovacevic - OT
+Aljosa Macic - CB
+Andrej Barac - OT
+Andrija Korac - OT
+Bogdan Gavrilovic - CF
+Darko Djurovic - GK
+Filip Novakovic - OT
+Mihajlo Repanović - OT
+Nebojsa Toholj - CF
+Nemanja Stanojevic - CB
+Novak Lazic - CB
+Novak Lazic
+Ognjen Moračanin - OT
+Ognjen Stojanović - OT
+Ognjen Tomić - CB
+Petar Micanovic - OT
+Veljko Tomić - GK
+Veljko Tomić
+
+Beograd
+Beograd — trener TBD Nikola Milosavljević
+Aleksandar Andrejević - OT
+Aleksa Nesic - CB
+Arsenije Mitrović - OT
+Bojan Banicevic - CB
+Boris Ičagić - OT
+Danilo Čabrilo - CF
+Dorde Zivkovic - OT
+Filip Ristivojević - CB
+Jovan Stamenkovic - OT
+Luka Scekic - OT
+Marko Banovic - OT
+Matija Vlahovic - GK
+Matija Vlahovic
+Milos Suberic - OT
+Nikola Djurisic - CF
+Pavle Pribicevic - OT
+Petar Kasum - OT
+Teo Belivuk - OT
+Uglješa Acković - CB
+Uros Mirkovic - OT
+Uroš Vasović - GK
+Uroš Vasović
+Viktor Savić - GK
+Viktor Savić
+
+Budva BDR
+Budva BDR — trener TBD
+Andrija Rajovic
+Andrija Rajovic - GK
+Balsa Stefan - OT
+David Delic
+David Delic - OT
+Dorde Pejovic - OT
+Dragoljub Cetkovic - GK
+Georgios Kalaitzis - OT
+Gyorgy Agh - CF
+Jovan Radic - OT
+Luka Dragovic - OT
+Luka Kotorac - OT
+Luka Savic - OT
+Marko Milic - OT
+Matija Brguljan - CB
+Matija Franeta - OT
+Nebojsa Vuskovic - OT
+Nedjo Bastrica - CF
+Nenad Dragović - OT
+Pavle Dabic - OT
+Srdjan Baucalo - CB
+Todor Vukcevic - OT
+Vladan Vukićević - OT
+
+Cattaro
+Cattaro — trener TBD
+Andrej Radic
+Andrija Bjelica
+Andrija Bjelica
+Andrija Roganovic
+Bruno Perov
+Dragan Marković
+Dušan Milaš
+Ivan Marković
+Lazar Janjusevic
+Ljubomir Kovačić
+Luka Ivanovic
+Luka Ivanovic
+Martin Petrovic
+Milan Nikaljevic
+Milija Mandić
+Nikola Jovancevic
+Relja Vukanić
+Svetozar Vodovar
+Tomo Vičević
+Uglješa Vukasović
+Vanja Golubović
+Vanja Gopčević
+Veljko Vujovic
+
+Nais Niš
+Nais Niš — trener TBD
+Adam Živadinović
+Adam Živadinović - GK
+Aleksandar Mitrović - OT
+Igor Lazić - GK
+Luka Pejić - OT
+Mateja Đorđević - CF
+Mihajlo Mitrović - OT
+Milan Kovačević - OT
+Miljan Bošković - OT
+Milutin Pošmuga - OT
+Nemanja Ilić
+Nemanja Šilj - CB
+Pavle Pavlović - OT
+Petar Mitrovic - CF
+Radivoj Radanović - OT
+Vuk Radovic - OT
+
+NBG Vukovi
+NBG Vukovi — trener TBD - Nenad Vasilovski
+Aleksandar Radosavljevic - OT
+Andrija Čubrillović - OT
+Damjan Ristić - GK
+Damjan Ristić
+Dušan Mickić - CF
+Dusan Ostojic - GK
+Dusan Ostojic
+Filip Ćorić - CB
+Ivan Peleš - OT
+Jovan Stanković - OT
+Mihajlo Savić - OT
+Milutin Aleksandrov - OT
+Mitar Maras - CB
+Mladen Savic - CB
+Nikola Nikolić - OT
+Petar Radović - CF
+Uroš Furunović - OT
+Uroš Munćan - OT
+Uroš Vujković - OT
+Vasilije Pakaški - OT
+Vasilije Toršan - OT
+Vuk Milošević - OT
+
+Stari Grad
+Stari Grad — trener TBD
+Aleksa Konatar - CB
+Andrija Pavlović - OT
+Andrija Sekulić - OT
+Danilo Momčilović - OT
+Đorđe Ljubenović - OT
+Dragan Marjanović - CF
+Lazar Kuzmanovski - OT
+Luka Bosic - OT
+Luka Gligorijević - CB
+Mateja Asanovic - OT
+Mihajlo Ivanović - OT
+Mihajlo Ivanović
+Nebojša Petrović - OT
+Ognjen Ilic - GK
+Ognjen Ilic
+Simo Štrbac - OT
+Vanja Krdžalin - OT
+Velizar Ivanović - OT
+Vuk Stevanović - OT
+
+Valis Vega
+Valis Vega — trener TBD - Miloš Saković
+Aleksa Ninović - OT
+Anatolii Evdokushin - OT
+Bogdan Gavrilović - CB
+Đorđe Knežević - OT
+Drasko Samardzic - OT
+Dušan Aleksandrov - OT
+Ilija Kojičić - CF
+Lazar Antic - OT
+Lazar Jeremic - CF
+Luka Stamatov - CF
+Marko Arsić - OT
+Nikola Stankovic - OT
+Ognjen Stojilković - GK
+Ognjen Stojilković
+Petar Stanic - CB
+Radosav Virijevic - GK
+Radosav Virijevic
+Sergej Nekredin - GK
+Sultan Shonzhigitov - CF
+Veljko Babic - OT
+Veljko Babić
+Vuk Kojic - OT
+Zoran Poznanović - OT
+
+Vojvodina
+Vojvodina — trener TBD
+Aleksandar Lekić - OT
+Aleksandar Maričić - OT
+Bogdan Brescanski - CF
+Luka Drobnjaković - CF
+Maksim Blažević - OT
+Marko Tubić - OT
+Milan Šantalab - GK
+Milan Šantalab
+Milan Zelić - OT
+Milos Popadic - GK
+Miroslav Ranđić - CB
+Nemanja Grgic - OT
+Nikola Hrgović - OT
+Nikola Marić - CB
+Novak Bogdanović - OT
+Stefan Teodorović - OT
+Vasilije Vujović - OT
+
+Zemun
+Zemun — trener TBD
+Aleksa Damjanović - OT
+Aleksa Damjanović
+Aleksa Stajić - OT
+Aleksa Stanojević - OT
+Andrej Karalić - OT
+Andrija Vukotić - OT
+Luka Borovčanin - OT
+Luka Miličević - CB
+Luka Trajković - OT
+Marko Zec - OT
+Milan Bulajić - GK
+Milan Bulajić
+Miodrag Jovanović - CB
+Neven Čerkez - OT
+Nikola Japundžić - OT
+Nikola Kovačević - OT
+Pavle Radić - CF
+Petar Jovic - OT
+Vanja Đurić - OT
+Vladimir Tanović - OT
+Vuk Jovanović - CF
+Vuk Mihailović - CB

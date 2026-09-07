@@ -27,7 +27,7 @@ class TeamsAPI(unittest.IsolatedAsyncioTestCase):
         self.players=[Player(competition_id=self.comp.id,name=f'P{i}',real_club='Club',position=Position(pos),current_cost=Decimal('7.10')) for i,pos in enumerate(['GK','OT','OT','OT','OT','CF','CB','GK','OT','OT','CF','CB'])]
         self.coach=Coach(competition_id=self.comp.id,name='Coach',real_club='Club',current_cost=Decimal('7.00'))
         self.session.add_all([self.day,self.coach,*self.players]);self.session.commit()
-        self.token=create_access_token(self.user.id);self.other_token=create_access_token(self.other_user.id)
+        self.token=create_access_token(self.user.id,0);self.other_token=create_access_token(self.other_user.id,0)
         async def db():yield helpers.AsyncSessionAdapter(self.session)
         app.dependency_overrides[get_db]=db
 

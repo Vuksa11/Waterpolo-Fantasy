@@ -70,17 +70,36 @@ async def test_enforce_rate_limit_blocks_over_limit_and_resets():
 
 async def test_login_lockout_blocks_after_limit_and_clears_on_success():
     key = "ratelimit:test:lockout"
-    await check_lockout(key, limit=5)  # not locked out yet
+    await check_lockout(key, limit=5, window_seconds=900)  # not locked out yet
 
     for _ in range(5):
         await record_failed_attempt(key, window_seconds=900)
 
     with pytest.raises(HTTPException) as exc_info:
-        await check_lockout(key, limit=5)
+        await check_lockout(key, limit=5, window_seconds=900)
     assert exc_info.value.status_code == 429
 
     await clear_lockout(key)
-    await check_lockout(key, limit=5)  # must not raise anymore
+    await check_lockout(key, limit=5, window_seconds=900)  # must not raise anymore
+
+
+async def test_check_lockout_self_heals_legacy_counter_without_ttl(fake_redis_client):
+    """An independent review (Codex, problemV16) found that a counter
+    already at/over the limit but missing its TTL (from before the
+    SET-NX-EX fix, or otherwise damaged) stays locked out forever: since
+    check_lockout is read-only and runs BEFORE record_failed_attempt's own
+    self-heal ever gets a chance to, that healing path was unreachable for
+    an already-locked-out key. check_lockout must heal it itself."""
+    key = "ratelimit:test:legacy-lockout"
+    await fake_redis_client.set(key, 5)  # as if created before SET NX EX existed -- no TTL
+    assert await fake_redis_client.ttl(key) == -1
+
+    with pytest.raises(HTTPException) as exc_info:
+        await check_lockout(key, limit=5, window_seconds=900)
+    assert exc_info.value.status_code == 429
+
+    ttl = await fake_redis_client.ttl(key)
+    assert ttl > 0, "check_lockout must heal a damaged counter's missing TTL, not just report it as locked out forever"
 
 
 def _fake_request(client_host: str | None, headers: dict | None = None):

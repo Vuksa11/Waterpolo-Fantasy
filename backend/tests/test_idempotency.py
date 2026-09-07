@@ -185,7 +185,7 @@ async def roster_fixture(db_session):
 def _token_for(user_id: uuid.UUID) -> str:
     from app.core.security import create_access_token
 
-    return create_access_token(user_id)
+    return create_access_token(user_id, 0)
 
 
 async def _create_team(client, roster_fixture):

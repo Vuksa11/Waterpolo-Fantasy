@@ -126,6 +126,10 @@ class PlayerOut(BaseModel):
     external_id: str | None
     name: str
     position: str | None
+    # Meaningless when position is null. False marks a placeholder position
+    # assigned only to balance a club's position counts, not a real,
+    # user-confirmed one -- see Player.position_verified's docstring.
+    position_verified: bool
     real_club: str
     current_cost: float
 

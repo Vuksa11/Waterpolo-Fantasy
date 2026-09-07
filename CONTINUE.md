@@ -431,16 +431,133 @@ concurrent write profile with Redis) in `backend/loadtest/results/`. Server
 left running with `REDIS_URL` set, 1 worker (`.env` updated permanently, not
 just for this session).
 
-## Blocked on the user
+## `players.position` and real coach names — RESOLVED (2026-09-07)
 
-- **`players.position`** (OT/CF/CB) — null for every player. Not scrapeable
-  (confirmed absent from the match box-score page). The user said they'll
-  send a reference file. This blocks: lineup/formation validation, and the
-  frontend's team-builder (which correctly disables buying any player until
-  this exists).
-- **Real coach names** — every club currently has one generic placeholder
-  `Coach` row (name suffixed "— trener TBD"). Same file as positions, per the
-  user.
+No longer blocked. The user manually annotated `players.position` for
+almost every scraped player (reference file `~/Downloads/rosteri2.0.txt`,
+17 clubs, 352 players) and supplied real coach names for 7 clubs. Applied
+to the DB:
+
+- **348 of 352 players now have a real `position`** (`GK`/`OT`/`CF`/`CB`).
+  4 remain `NULL`, intentionally, because there is no reliable way to
+  resolve them: 2 are the known unnamed-goalkeeper placeholder rows (name
+  `"- -"`, Primorac and Šabac Elixir — pre-existing, documented issue, see
+  the goalkeeper-stable-ID note below), and 2 (`Samuil Tsvetanov Ivanov` at
+  Radnički, `Nemanja Ilić` at Nais Niš) were left without a position
+  annotation by the user in the source file — not guessed, flagged instead.
+  **Superseded below** (see "problemV17.md" section further down): 18 more
+  players lost their position after a duplicate-identity correction, and
+  the whole thing was rewritten as a committed, reproducible script — 330,
+  not 348, is the current real count.
+- **Cattaro** (23 players) had zero position annotations in the source
+  file. Per the user's explicit instruction, positions were assigned by
+  hand to mirror the position mix of the other 16 clubs (roughly OT 57%,
+  GK 16%, CB 16%, CF 10%): GK=3, OT=13, CB=4, CF=3. This is **not**
+  researched/real data — it's a deliberate placeholder assignment, done
+  only because the user asked for one; worth revisiting if a real Cattaro
+  roster/position source ever turns up.
+- **Duplicate same-name rows**: several clubs have two distinct `Player`
+  rows sharing one name (e.g. two "Matija Vlahovic" rows at Crvena Zvezda).
+  In every case but Cattaro's, the user's file gave a position to exactly
+  one occurrence and left the other blank — both DB rows were set to that
+  same position, since there's no way to tell which physical row is which.
+- **Coach names**: 13 of 17 clubs now have a real `Coach.name` (round 1: 8,
+  round 2 same day added 5 more after the user asked for a deeper, more
+  thorough search). 7 came straight from the user's file (NBG Tehnomanija:
+  Zoran Bajić, Partizan: Stefan Ćirić, Radnički: Uroš Stevanović, Šabac
+  Elixir: Nemanja Ličanin, Beograd: Nikola Milosavljević, NBG Vukovi: Nenad
+  Vasilovski, Valis Vega: Miloš Saković). The other 6 came from web
+  research, each cross-checked before being trusted:
+  - **Jadran m:tel HN → Petar Radanović** — pvkjadran.com's official squad
+    page; 7 of 15 scraped roster names (Danilo Stupar, Dmitri Kholod, Ilija
+    Radovic, Jovan Vujovic, Matija Sladovic, Strahinja Gojkovic, Vasilije
+    Radovic) match exactly.
+  - **Budućnost One → Aleksandar Aleksić** — pvkbuducnost.me's coverage of
+    "PVK Budućnost" (Podgorica); 13 of 22 scraped roster names matched its
+    published squad — the strongest cross-check of this whole round.
+  - **Primorac → Anastasios (Sakis) Kehajas** — reported by 4 independent
+    Montenegrin outlets (RTCG, CDM, aktuelno.me, gradski.me), appointed 24
+    June 2025, replacing Vjekoslav Pasković. No roster to cross-check, but
+    corroborated by multiple outlets with a specific date.
+  - **Budva BDR → Miloš Popović** — December 2025 Cup-of-Montenegro final
+    four coverage that also named Primorac, Budućnost One, and Jadran m:tel
+    as the other 3 semifinalists — exactly our own club list, strong
+    contextual confirmation.
+  - **Vojvodina → Darko Bilić** — consistent across multiple 2025 sources
+    (uvts.rs coach registry, vaterpolovesti.com, a September 2025 tournament
+    mention).
+  - **Zemun → Andrija Vasiljević** — official club site (vkzemun.org.rs),
+    both its "Stručni štab" and "Prvi tim 2025-2026" pages; cross-checked
+    via player "Milan Bulajić" appearing on both the official roster and our
+    own scraped one. **Side note surfaced by this check, not acted on**: the
+    official site lists Aleksa Damjanović at jersey #13 (a GK number), while
+    the user's file marked him "OT" — flagged, not silently overridden,
+    since the user's manual position annotation was treated as the source of
+    truth this round.
+  Still had no verifiable real name after a genuinely thorough search:
+  - **Crvena Zvezda** — actively coachless per multiple 2026 news reports:
+    coach Aleksandar Filipović left mid-season (too few players showing up
+    to training), separate reports describe the club in serious financial
+    trouble. There's no stable coach to name right now.
+  - **Cattaro (VA Cattaro)** — a "new season" presentation names 4 people
+    (Mlađan Tujković, Željko Vičević, Nebojša Milić, Ivan Bjelobrković) with
+    no indication which one is the sole head coach — reads as a multi-coach
+    academy staff, not a single-name role.
+  - **Nais Niš** — every source found (several search phrasings tried) was
+    stale (2015–2018) or silent on 2025/26.
+  - **Stari Grad** — confirmed former coach Zoran Mijalkovski left for Novi
+    Beograd (Feb 2026, total-waterpolo.com's own news post), but no
+    successor was found anywhere.
+
+  Per the user's explicit follow-up request ("za preostale trenere uradi
+  mock za sad"), these 4 now carry a **fictional placeholder name, suffixed
+  `(mock)`** instead of the old "— trener TBD" text: Crvena Zvezda → Dušan
+  Marković (mock), Cattaro → Ivan Radulović (mock), Nais Niš → Vladimir
+  Antić (mock), Stari Grad → Dejan Simić (mock). These are made up, not
+  sourced from anything — swap them out the moment a real name is found or
+  supplied.
+- Investigated the two "- -" unresolved-name player rows (Primorac,
+  Šabac Elixir) at the user's request, since the working assumption in this
+  doc and in `player_resolver.py`'s docstring was that these were
+  goalkeepers without a stable id. **That assumption was wrong for these two
+  specific rows** — rendered the actual match pages via the existing
+  Playwright scraper (`fetch_boxscore.render_match_page`, matches 12534 and
+  12536) and found both are jersey **#16 FIELD players** (not goalkeepers,
+  `#homePlayers`/`#awayPlayers` section, not `#...Goalkeepers`), each with a
+  perfectly stable `external_player_id` (11670 and 4603) from a normal
+  `OpenPlayerPage(...)` onclick. Also loaded each player's own profile page
+  on the source site (`total-waterpolo.com/tw_player/11670` and `/4603`) —
+  both show the name field itself as literally "- -", with every other bio
+  field (position/hand/height/weight) blank too, and both play in
+  youth-adjacent competitions (U-15 Montenegro Cup, etc.) alongside VRL
+  Premier. **Conclusion: this is a real data gap on totalwaterpolo.com
+  itself** (the site never published these two young players' names), not a
+  scraper bug and not something further searching can fix — left as `NULL`
+  name is already correct behavior, no code or data change needed.
+  Follow-up check the user asked for specifically: Šabac Elixir's actual
+  goalkeepers (jersey #1 "Darko Djurovic", jersey #13 "Veljko Tomić", both
+  visible in the same match's `#homeGoalkeepers` section) are **not**
+  missing — both already exist in the DB with the right name and `GK`
+  position. The "- -" row is a separate, unrelated player (jersey #16,
+  regular field-player section) — the goalkeepers were never the ones with
+  the gap. Also
+  checked whether total-waterpolo.com exposes coach data anywhere (a
+  `tw_team/{id}` profile page pattern exists and was tried for several
+  clubs) — confirmed it does not; the whole "coach names" search had to be
+  general web research for this reason.
+- Full test suite re-run after applying: 42 passed, 0 failed.
+- `save_lineup`'s formation validation and the frontend team-builder's
+  "Nedostaje potvrđena pozicija" disabled state now have real position data
+  to check against for most players. **Correction (an independent review,
+  Codex, problemV17, correctly pushed back on this):** this is not the same
+  as "the real team-builder flow is unblocked end-to-end" -- confirmed live
+  that both competitions currently have 0 matchdays with status UPCOMING,
+  and `check_window` in `app/routers/teams.py` correctly rejects any
+  lineup/transfer without one, regardless of position data. Position data
+  existing removes one blocker, not the only one; an actual end-to-end
+  check needs a fixture with a real future deadline, not the historical
+  matchdays currently in this dataset.
+
 - **Goalkeeper stable IDs** — field players get a stable external id
   straight from the box score; goalkeepers don't (confirmed, not a bug).
   Needs a team-squad page sample to resolve properly; currently matched by
@@ -475,11 +592,10 @@ Critical findings (blocking "real fantasy product," not code-quality bugs):
 2. **No fantasy leaderboard** -- FIXED same session, see the commit above
    (`GET /api/competitions/{id}/leaderboard`, correct in shape today, will
    show real numbers once #1 is built).
-3. **`players.position` still null for every player** -- known, honestly
-   documented, blocked on the project owner's reference file. Named
-   explicitly here because its real consequence is that "API mode" is
-   currently a read-only demo, not an end-to-end playable game, since
-   `save_lineup` correctly rejects every real roster.
+3. **`players.position` still null for every player** -- RESOLVED
+   2026-09-07, see "`players.position` and real coach names — RESOLVED"
+   above: 348/352 players now have a real position, unblocking
+   `save_lineup`'s formation validation for almost the entire dataset.
 4. **No rate limiting / brute-force protection on auth** -- confirmed live:
    15 consecutive wrong-password attempts against the same account all
    returned a clean 401, no 429, no lockout, no CAPTCHA. bcrypt's own cost
@@ -587,6 +703,165 @@ NOT done from either review: team-level fantasy scoring aggregation (the
 biggest product-completeness gap, still blocked on players.position for
 the "real" version), crash-recovery for a fully-dead idempotency claim,
 and a `(user_id, league_id)` unique constraint on fantasy_teams.
+
+## problemV16.md (Codex) -- all 6 findings fixed, same discipline as before (2026-09-07)
+
+Codex reviewed everything up to commit `4574f65` and wrote
+`Problems/problemV16.md` (6 findings: 3 P1 security, 2 P2, 1 P1-for-tests).
+Same standing practice as every prior round: each was independently
+verified (either by reading the actual code path, or reproducing it live
+through the real app) before being fixed, not trusted on word.
+
+1. **Reset-password race (P1)** — `reset_password` read the token with a
+   plain `SELECT`, no locking. Two concurrent requests carrying the same
+   still-valid token could both read it as valid before either committed,
+   both successfully set a (different) new password, with no error to
+   either caller. Fixed with `select(User)...with_for_update()`: the lock
+   is held from the read through the commit (including the slow bcrypt
+   hash — same tradeoff as `create_team`'s Season lock), and the token is
+   cleared on the SAME row before the hash runs. A concurrent request
+   blocks on the lock, then Postgres re-checks its WHERE clause against the
+   now-committed (token now NULL) row before granting it, so it correctly
+   finds no match instead of proceeding. Verified with a real test hitting
+   the actual endpoint through the ASGI app against the real dev Postgres
+   DB with two genuinely concurrent requests via `asyncio.gather`
+   (`test_reset_password_race_only_one_concurrent_request_succeeds`) — not
+   just an isolated reproduction of the query.
+2. **Reset doesn't invalidate old JWTs (P1)** — a token issued before a
+   password reset kept working normally until its own 7-day expiry, even
+   though the reset was presumably a response to a suspected compromise.
+   Fixed with a new `users.credentials_version` column (migration
+   `09f392236159`), embedded in every JWT as `"cv"` and checked against the
+   user's current value on every request (`app/deps.py`); a successful
+   reset increments it, invalidating every previously-issued token
+   everywhere at once. Verified with a real test: token obtained before
+   reset gets 401 on `/api/auth/me` immediately after, a token obtained
+   after the reset works normally
+   (`test_reset_password_invalidates_previously_issued_tokens`).
+3. **Email tokens logged unconditionally outside development (P1)** —
+   `send_email` logged the full body (which carries a live verification or
+   reset token) regardless of environment. Fixed: full body only logs when
+   `settings.environment == "development"`; everywhere else, only a
+   token-free notice is logged. The underlying limitation (no real email
+   provider) is unchanged and still honestly surfaced — this only stops
+   the token itself from ending up in a shared/persisted log sink.
+4. **Cache fallback doesn't actually dedupe without Redis, and its lock
+   dict never shrinks (P2)** — the previous per-key-`asyncio.Lock` version
+   of `get_or_compute_json` only serialized concurrent callers for the same
+   key; it never shared the *result*, so with caching disabled (no Redis,
+   or Redis down) 25 concurrent callers still ran `compute()` 25 times,
+   just one at a time instead of in parallel -- confirmed independently by
+   Codex (263ms for a ~10ms compute) before I fixed it. The lock dict also
+   never removed entries, growing without bound across the real key space
+   (confirmed: 200 unique keys left 201 dead locks). Rewrote it around a
+   single shared in-flight `asyncio.Task` per key instead of a lock: every
+   concurrent caller awaits the SAME task, and the entry is removed the
+   moment it finishes (success or failure) — fixes both problems in one
+   change. Verified with 3 tests: the original 25-concurrent-with-Redis
+   case still works, a new 25-concurrent-*without*-Redis case (the actual
+   regression) now also computes exactly once
+   (`test_concurrent_misses_compute_once_even_without_redis`), and a
+   200-unique-key test confirms the dict is empty once every call has
+   finished (`test_inflight_dict_does_not_grow_unbounded`).
+5. **Legacy lockout counters missing a TTL stay locked out forever (P2)** —
+   `_increment_with_ttl`'s self-heal (added in the problemV15 round) only
+   runs on an *increment*, but `login` calls the read-only `check_lockout`
+   FIRST — so an account already at/over the limit with a damaged (TTL -1)
+   counter returns 429 forever with no code path that ever reaches the
+   healing logic. Reproduced with fakeredis (a counter manually set to 5
+   with no TTL stayed at TTL -1 and locked out indefinitely) before fixing:
+   `check_lockout` now self-heals a missing TTL itself, given the same
+   `window_seconds` `record_failed_attempt` uses
+   (`test_check_lockout_self_heals_legacy_counter_without_ttl`).
+6. **Test suite wipes `ratelimit:*` on WHATEVER Redis DB is configured,
+   including a real shared one (P1 for the test environment)** — the
+   autouse fixture in `conftest.py` scans and deletes every `ratelimit:*`
+   key before each test on whatever `REDIS_URL` resolves to; running pytest
+   with the same `.env` a real dev/prod server uses would delete real
+   rate-limit/lockout state, not just test leftovers. Fixed by forcing the
+   whole test session onto a dedicated logical Redis DB (15) regardless of
+   whatever db number the configured URL already has — done once at
+   `conftest.py` import time by rewriting `settings.redis_url`'s path.
+   Verified manually: ran the lockout test with `REDIS_URL` pointing at the
+   normal dev Redis, confirmed keys landed on db 15
+   (`redis-cli -n 15 keys ratelimit:*` showed them) while db 0 stayed at
+   `dbsize` 0 throughout the entire suite, both before and after.
+
+Full suite: 47 passed (was 42; +5 new tests for these fixes), both with and
+without `REDIS_URL` set (45 passed + 2 skipped without it, matching the 2
+`requires_redis`-marked lockout tests).
+
+Not addressed by this round, called out in problemV16.md itself as still
+open (nothing new here, same items already tracked elsewhere in this file):
+CI still skips 6 integration tests needing real roster data; logging isn't
+an alerting system; team-level scoring aggregation, idempotency
+crash-recovery, and the `(user_id, league_id)` unique constraint remain
+open.
+
+## problemV17.md (Codex) -- reproducible backfill + duplicate-identity fix (2026-09-07)
+
+Codex reviewed the two documentation-only commits after problemV16
+(`ccb30e3`, `180009a`) and correctly pointed out they were exactly that --
+docs only, no application code, so none of problemV16's 6 findings were
+actually fixed by them (they've since been fixed, see the section above,
+same session). Two NEW findings in this review, both real and both fixed:
+
+1. **The position/coach backfill wasn't reproducible from the repo (P1)** —
+   `git diff --stat` between those commits showed only `CONTINUE.md` and
+   the handoff doc; the actual backfill was done via throwaway scripts in
+   `/tmp`, never committed. A fresh checkout + migration could not
+   reproduce the 348 positioned players or the 13 real coach names at all.
+   Fixed: `scripts/backfill_positions_and_coaches.py` is now a real,
+   committed, idempotent script — the source file itself
+   (`scripts/data/rosteri2.0.txt`, the user's manually-reviewed roster
+   export) is also committed, so the whole thing re-derives from the repo,
+   not from memory of what I ran in a scratch directory. Matches by
+   `(real_club, name)`, not local UUIDs (which wouldn't exist in a fresh
+   DB). Verified idempotent: ran it twice, identical output both times
+   (`Position updates: 328` both runs).
+2. **Placeholder positions were indistinguishable from real ones in the API
+   (P2)** — `PlayerOut` returned only `position`, with no way to tell
+   Cattaro's 23 hand-guessed placeholder positions apart from the 348 the
+   user actually reviewed; both the docs and (per Codex) the frontend's own
+   copy were calling all of them "confirmed." Fixed: new
+   `players.position_verified` column (migration `feaae23bb208`, default
+   `true`), set to `false` only for Cattaro's 23 rows, exposed on
+   `PlayerOut`. Formation validation in `save_lineup` still accepts any
+   non-null position regardless of this flag (a placeholder position is
+   still a position for gameplay purposes) — this is purely a
+   provenance/UI signal, not a new gameplay gate; the frontend is
+   responsible for whatever visual distinction it wants to make with it.
+
+**A third finding, not new but re-surfaced with a sharper edge** ("nije
+potvrđen duplikat identiteta" -- duplicate identity not confirmed): Codex
+cautioned that applying one position to both rows of a 24 shared-name pairs
+doesn't prove they're the same person, and warned against any automatic
+merge. Investigating this surfaced something worth fixing on its own
+merits, not just addressing the caution: **all 24 pairs turned out to have
+exactly one row WITH a stable `external_id` and one row WITHOUT** — this
+matches the scraper's own long-documented, independently-verified behavior
+that goalkeepers never get a stable id (`scraper/player_resolver.py`),
+while field players always do. The original backfill's "same position for
+both" approach therefore likely mislabeled several real field players as
+goalkeepers (whenever the source file's only data point for a shared name
+was "GK"). `backfill_positions_and_coaches.py` now treats the
+no-`external_id` row as the goalkeeper unconditionally, and applies the
+file's given position to the `external_id` row only when that value isn't
+itself "GK" (18 of the 24 pairs' field-player rows lost their position as a
+result — from `GK`, wrongly, to `NULL`, honestly; 5 pairs kept a real
+non-GK position on the field-player row; a 24th pair, Valis Vega's "Veljko
+Babić"/"Veljko Babic", has BOTH rows with an external_id — doesn't fit this
+shape at all, so the script correctly leaves it untouched rather than
+guessing). Net effect: positioned-player count dropped from 348 to 330,
+which is the correct direction — honest is better than complete here.
+**Not a merge**: both rows of every pair still exist as distinct catalog
+entries; whether any of these 24 pairs are actually the same real person
+(vs. two different people who happen to share a name) is still genuinely
+unresolved and would need real identity verification (match history,
+external site cross-reference) before anyone should act on it further.
+
+Full suite still 47 passed after this. `scripts/data/rosteri2.0.txt` and
+`scripts/backfill_positions_and_coaches.py` are both new, committed files.
 
 ## Suggested next steps, roughly in order
 

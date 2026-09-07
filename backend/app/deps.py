@@ -16,12 +16,19 @@ async def get_current_user(
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
-    user_id = decode_access_token(credentials.credentials)
-    if user_id is None:
+    decoded = decode_access_token(credentials.credentials)
+    if decoded is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+    user_id, token_credentials_version = decoded
 
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    # A password reset bumps User.credentials_version (see its docstring) --
+    # a token carrying an older value was issued before that reset and must
+    # stop working immediately, not linger until its normal 7-day expiry.
+    if token_credentials_version != user.credentials_version:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
     return user

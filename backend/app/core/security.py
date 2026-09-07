@@ -47,15 +47,26 @@ async def verify_password_async(password: str, password_hash: str) -> bool:
     return await asyncio.to_thread(verify_password, password, password_hash)
 
 
-def create_access_token(user_id: uuid.UUID) -> str:
+def create_access_token(user_id: uuid.UUID, credentials_version: int) -> str:
+    """
+    `credentials_version` is embedded as "cv" and checked against the
+    User row's current value on every request (see deps.get_current_user) --
+    this is what lets a password reset invalidate every token issued before
+    it (see User.credentials_version's docstring). Callers must pass the
+    version that was current AT THE TIME this token is issued (i.e. the
+    just-loaded user row's value), not a stale one.
+    """
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
-    payload = {"sub": str(user_id), "exp": expire}
+    payload = {"sub": str(user_id), "exp": expire, "cv": credentials_version}
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def decode_access_token(token: str) -> uuid.UUID | None:
+def decode_access_token(token: str) -> tuple[uuid.UUID, int] | None:
+    """Returns (user_id, credentials_version) from the token, or None if it's
+    malformed/expired/invalid. "cv" defaults to 0 for tokens issued before
+    this field existed, matching User.credentials_version's own default."""
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
-        return uuid.UUID(payload["sub"])
+        return uuid.UUID(payload["sub"]), int(payload.get("cv", 0))
     except (jwt.InvalidTokenError, KeyError, ValueError):
         return None

@@ -59,7 +59,7 @@ async def register(body: UserRegisterIn, request: Request, db: AsyncSession = De
     verify_link = f"{settings.frontend_base_url}/verify-email?token={user.email_verification_token}"
     await send_email(user.email, "Potvrdite svoj nalog", f"Kliknite da potvrdite email: {verify_link}")
 
-    return TokenOut(access_token=create_access_token(user.id))
+    return TokenOut(access_token=create_access_token(user.id, user.credentials_version))
 
 
 @router.post("/login", response_model=TokenOut)
@@ -76,7 +76,7 @@ async def login(body: UserLoginIn, request: Request, db: AsyncSession = Depends(
     client_ip = get_client_ip(request)
     await enforce_rate_limit(f"ratelimit:login:ip:{client_ip}", limit=30, window_seconds=3600)
     lockout_key = f"ratelimit:login:email:{body.email}"
-    await check_lockout(lockout_key, limit=5)
+    await check_lockout(lockout_key, limit=5, window_seconds=900)
 
     user = await db.scalar(select(User).where(User.email == body.email))
     if (
@@ -88,7 +88,7 @@ async def login(body: UserLoginIn, request: Request, db: AsyncSession = Depends(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     await clear_lockout(lockout_key)
-    return TokenOut(access_token=create_access_token(user.id))
+    return TokenOut(access_token=create_access_token(user.id, user.credentials_version))
 
 
 @router.get("/me", response_model=UserOut)
@@ -146,7 +146,24 @@ async def forgot_password(
 
 @router.post("/reset-password", response_model=MessageOut)
 async def reset_password(body: PasswordResetConfirmIn, db: AsyncSession = Depends(get_db)) -> MessageOut:
-    user = await db.scalar(select(User).where(User.password_reset_token == body.token))
+    """
+    `with_for_update()` closes a real race an independent review (Codex,
+    problemV16) found and reproduced: without a lock, two concurrent
+    requests carrying the same (still-valid) token can both read the token
+    as valid before either commits, then both successfully set a new
+    password -- whichever commits last silently wins, with no error to the
+    loser.
+
+    The lock is acquired here and held for the rest of this request
+    (including the slow bcrypt hash below, same tradeoff already made for
+    `create_team`'s Season lock -- see its comment). A concurrent request
+    for the SAME token blocks on this row until the first commits; Postgres
+    then re-checks this SELECT's WHERE clause against the now-committed row
+    before granting the lock, and since the token column is already NULL by
+    then, the second request correctly finds no matching row instead of
+    proceeding.
+    """
+    user = await db.scalar(select(User).where(User.password_reset_token == body.token).with_for_update())
     if user is None:
         raise HTTPException(422, "Invalid or already-used reset token")
     if user.password_reset_token_expires_at is None or user.password_reset_token_expires_at < datetime.now(
@@ -154,8 +171,15 @@ async def reset_password(body: PasswordResetConfirmIn, db: AsyncSession = Depend
     ):
         raise HTTPException(422, "Reset token has expired")
 
-    user.password_hash = await hash_password_async(body.new_password)
+    # Consumed on the same row-locked user object as the hash below, so both
+    # land in the one UPDATE this transaction commits -- there is no
+    # window where the token is cleared but the new password isn't set, or
+    # vice versa.
     user.password_reset_token = None
     user.password_reset_token_expires_at = None
+    user.password_hash = await hash_password_async(body.new_password)
+    # Invalidates every token issued before this reset -- see
+    # User.credentials_version's docstring.
+    user.credentials_version += 1
     await db.commit()
     return MessageOut(detail="Lozinka je uspešno promenjena")

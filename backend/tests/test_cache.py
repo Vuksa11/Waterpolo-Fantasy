@@ -158,3 +158,51 @@ async def test_concurrent_cache_misses_compute_once(fake_redis_client):
 
     assert calls == 1, f"compute() should run exactly once for 25 concurrent misses, ran {calls} times"
     assert all(r == {"value": "computed-once"} for r in results)
+
+
+async def test_concurrent_misses_compute_once_even_without_redis(monkeypatch):
+    """A second independent review (Codex, problemV16) found that the
+    original per-key-Lock version of this dedup only serialized concurrent
+    callers without sharing compute()'s result -- with caching disabled
+    (no REDIS_URL, or Redis down), every waiter still ran compute() itself,
+    just one at a time instead of in parallel: 25 callers, compute() ran 25
+    times. Sharing the actual in-flight task (not just a lock) must fix this
+    regardless of whether Redis is available at all."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "redis_url", None)
+    cache_module._client = None
+    cache_module._client_initialized = False
+    try:
+        calls = 0
+
+        async def slow_compute():
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0.05)
+            return {"value": "computed-once"}
+
+        results = await asyncio.gather(
+            *[cache_module.get_or_compute_json("test:stampede-no-redis", slow_compute) for _ in range(25)]
+        )
+
+        assert calls == 1, f"compute() should run exactly once even without Redis, ran {calls} times"
+        assert all(r == {"value": "computed-once"} for r in results)
+    finally:
+        cache_module._client = None
+        cache_module._client_initialized = False
+
+
+async def test_inflight_dict_does_not_grow_unbounded(fake_redis_client):
+    """An independent review (Codex, problemV16) found the previous
+    per-key-Lock dict never removed entries -- 200 unique keys left 201 dead
+    locks behind. The in-flight dict must only ever hold keys that are
+    ACTIVELY being computed, not every key ever seen."""
+
+    async def compute():
+        return {"ok": True}
+
+    for i in range(200):
+        await cache_module.get_or_compute_json(f"test:unique-{i}", compute)
+
+    assert cache_module._inflight == {}, "no computation is in flight after all calls finished -- dict must be empty"
