@@ -290,6 +290,7 @@ async def team_outputs(db: AsyncSession, teams: list[FantasyTeam]) -> list[TeamO
                 purchase_price=float(entry.purchase_price),
                 current_cost=float(entity.current_cost),
                 position=getattr(entity, "position", None),
+                position_verified=getattr(entity, "position_verified", None),
             )
         )
     return [

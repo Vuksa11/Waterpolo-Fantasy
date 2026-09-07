@@ -265,6 +265,7 @@ class RosterEntryOut(BaseModel):
     real_club: str
     purchase_price: float
     position: str | None
+    position_verified: bool | None = None
     current_cost: float
 
 

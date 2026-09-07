@@ -35,8 +35,13 @@ class TeamsAPI(unittest.IsolatedAsyncioTestCase):
         return await self.request('/api/teams',{'competition_id':str(self.comp.id),'name':'Team','player_ids':[str(p.id) for p in self.players[:11]],'coach_id':str(self.coach.id)},token=self.token)
 
     async def test_owned_team_lineup_and_transfers(self):
+        self.players[0].position_verified=False;self.session.commit()
         status,team=await self.create();self.assertEqual(status,201,team);self.assertEqual(team['credit_balance'],14.9);self.assertEqual(len(team['roster']),12)
         self.assertEqual(team['competition_id'],str(self.comp.id));self.assertEqual(team['version'],0)
+        by_id={r['entity_id']:r for r in team['roster']}
+        self.assertIs(by_id[str(self.players[0].id)]['position_verified'],False)
+        self.assertIs(by_id[str(self.players[1].id)]['position_verified'],True)
+        self.assertIsNone(by_id[str(self.coach.id)]['position_verified'])
         _,duplicate=await self.create();self.assertIn('already',duplicate['detail'])
         url=f"/api/teams/{team['id']}/lineup?matchday_id={self.day.id}"
         payload={'formation':'THREE_THREE','active_player_ids':[str(p.id) for p in self.players[:7]],'captain_id':str(self.players[1].id),'expected_version':0}

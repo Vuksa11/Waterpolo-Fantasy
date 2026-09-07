@@ -28,6 +28,10 @@ const esc = (s) =>
         c
       ],
   );
+const positionNote = (p) =>
+  p.position && p.position_verified === false
+    ? '<small class="sub">Privremena pozicija</small>'
+    : "";
 const money = (n) => Number(n || 0).toFixed(1);
 const short = (n) =>
   n
@@ -154,9 +158,18 @@ function errorsView() {
     ...rosterErrors(draft.roster, draft.active),
   ];
   if (!draft.coach) issues.push("Trener nije izabran.");
-  return issues.length
-    ? `<div class="validation" role="status"><b>Još malo do spremnog tima</b><ul>${issues.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>`
-    : '<div class="valid-note">✓ Sastav i klupa odgovaraju formaciji.</div>';
+  const provisional = draft.roster.filter(
+    (p) => p.position && p.position_verified === false,
+  );
+  const note = provisional.length
+    ? `<p class="validation" role="status">Privremeno dodeljene pozicije: ${esc(provisional.map((p) => p.name).join(", "))}. Dozvoljene su za testiranje, ali nisu potvrđene.</p>`
+    : "";
+  return (
+    note +
+    (issues.length
+      ? `<div class="validation" role="status"><b>Još malo do spremnog tima</b><ul>${issues.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>`
+      : '<div class="valid-note">✓ Sastav i klupa odgovaraju formaciji.</div>')
+  );
 }
 function playerSlot(role, id, index, compact = false) {
   const p = draft.roster.find((p) => p.id === id);
@@ -271,7 +284,7 @@ function catalogContent() {
     return '<div class="loading"><span class="spinner"></span> Učitavam igrače…</div>';
   if (error)
     return `<div class="error-box">${esc(error)}<button id="retry-catalog" class="secondary">Pokušaj ponovo</button></div>`;
-  return `<div class="table-scroll"><table class="player-table"><thead><tr><th>Igrač</th><th>Pozicija</th><th>Klub</th><th>Cena</th><th></th></tr></thead><tbody>${catalog.items.map((p) => `<tr><td><button data-detail="${p.id}" class="catalog-name"><span class="avatar">${short(p.name).slice(0, 2)}</span><b>${esc(p.name)}</b></button></td><td data-label="Pozicija"><span class="role-tag">${p.position || "Nepoznata"}</span></td><td data-label="Klub">${esc(p.real_club)}</td><td data-label="Cena"><b>${money(p.current_cost)} kr</b></td><td><button class="secondary ${draft.roster.some((r) => r.id === p.id) ? "" : "dark"}" data-buy="${p.id}" ${!p.position ? 'disabled title="Nedostaje potvrđena pozicija"' : ""}>${draft.roster.some((r) => r.id === p.id) ? "U timu ✓" : "+ Dovedi"}</button></td></tr>`).join("")}</tbody></table>${catalog.items.length ? "" : '<div class="empty">Nema igrača za izabrane filtere.</div>'}</div><div class="pagination"><span>${catalog.total ? offset + 1 : 0}–${Math.min(offset + catalog.items.length, catalog.total)} od ${catalog.total} igrača</span><div><button class="secondary" id="prev-page" ${offset === 0 ? "disabled" : ""}>← Prethodna</button><button class="secondary" id="next-page" ${offset + 24 >= catalog.total ? "disabled" : ""}>Sledeća →</button></div></div>`;
+  return `<div class="table-scroll"><table class="player-table"><thead><tr><th>Igrač</th><th>Pozicija</th><th>Klub</th><th>Cena</th><th></th></tr></thead><tbody>${catalog.items.map((p) => `<tr><td><button data-detail="${p.id}" class="catalog-name"><span class="avatar">${short(p.name).slice(0, 2)}</span><b>${esc(p.name)}</b></button></td><td data-label="Pozicija"><span class="role-tag">${p.position || "Nepoznata"}</span>${positionNote(p)}</td><td data-label="Klub">${esc(p.real_club)}</td><td data-label="Cena"><b>${money(p.current_cost)} kr</b></td><td><button class="secondary ${draft.roster.some((r) => r.id === p.id) ? "" : "dark"}" data-buy="${p.id}" ${!p.position ? 'disabled title="Nedostaje potvrđena pozicija"' : ""}>${draft.roster.some((r) => r.id === p.id) ? "U timu ✓" : "+ Dovedi"}</button></td></tr>`).join("")}</tbody></table>${catalog.items.length ? "" : '<div class="empty">Nema igrača za izabrane filtere.</div>'}</div><div class="pagination"><span>${catalog.total ? offset + 1 : 0}–${Math.min(offset + catalog.items.length, catalog.total)} od ${catalog.total} igrača</span><div><button class="secondary" id="prev-page" ${offset === 0 ? "disabled" : ""}>← Prethodna</button><button class="secondary" id="next-page" ${offset + 24 >= catalog.total ? "disabled" : ""}>Sledeća →</button></div></div>`;
 }
 function fixturesPage() {
   return `<div class="page-title section-banner"><div><div class="eyebrow">${esc(currentCompetition()?.name)}</div><h1>Raspored</h1><p>Vreme početka prikazano za Beograd.</p></div><select id="matchday" aria-label="Izaberi kolo">${matchdays.map((d) => `<option value="${d.id}" ${selectedDay === d.id ? "selected" : ""}>${esc(d.label)}</option>`).join("")}</select></div><section class="card"><div class="card-head tinted"><h3>${esc(currentDay()?.label || "Utakmice")}</h3><span class="pill">${matches.length} utakmica</span></div>${fixtureRows()}</section>`;
@@ -735,7 +748,7 @@ async function detail(id) {
     if (mode === "api") p = await request(`/players/${id}`);
     if (!$("#dialog").open) return;
     modal(
-      `<div class="eyebrow">${esc(p.real_club)} · ${p.position || "NEPOZNATA POZICIJA"}</div><h2>${esc(p.name)}</h2><div class="summary-stats"><div><span>Cena</span><strong>${money(p.current_cost)} kr</strong></div><div><span>Poeni</span><strong>${mode === "demo" ? p.points || "—" : money(p.season?.total_raw_points)}</strong></div></div><p>${p.position ? "Pozicija: " + p.position : "Pozicija još nije potvrđena u bazi. Igrač ne može u validan sastav."}</p>${draft.roster.some((r) => r.id === id) ? (serverTeam ? "<p>Zameni ovog igrača kroz transfere da roster ostane kompletan.</p>" : '<button class="secondary" id="sell">Ukloni iz lokalnog rostera</button>') : p.position ? '<button class="primary" id="profile-buy">Dovedi igrača</button>' : ""}`,
+      `<div class="eyebrow">${esc(p.real_club)} · ${p.position || "NEPOZNATA POZICIJA"}</div><h2>${esc(p.name)}</h2><div class="summary-stats"><div><span>Cena</span><strong>${money(p.current_cost)} kr</strong></div><div><span>Poeni</span><strong>${mode === "demo" ? p.points || "—" : money(p.season?.total_raw_points)}</strong></div></div><p>${p.position ? "Pozicija: " + p.position + (p.position_verified === false ? " — privremeno dodeljena za testiranje, nije potvrđena." : "") : "Pozicija još nije potvrđena u bazi. Igrač ne može u validan sastav."}</p>${draft.roster.some((r) => r.id === id) ? (serverTeam ? "<p>Zameni ovog igrača kroz transfere da roster ostane kompletan.</p>" : '<button class="secondary" id="sell">Ukloni iz lokalnog rostera</button>') : p.position ? '<button class="primary" id="profile-buy">Dovedi igrača</button>' : ""}`,
     );
     $("#sell")?.addEventListener("click", () => {
       draft.roster = draft.roster.filter((r) => r.id !== id);
@@ -761,6 +774,7 @@ function hydrateTeam(team, lineup = null) {
       id: r.entity_id,
       name: r.name,
       position: r.position,
+      position_verified: r.position_verified,
       real_club: r.real_club,
       current_cost: Number(r.current_cost),
     }));

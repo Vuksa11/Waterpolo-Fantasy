@@ -52,6 +52,11 @@ async function fetchRequest(
         error.retryAfter = wait;
         throw error;
       }
+      if (response.status === 401 && token)
+        throw new ApiError(
+          "Sesija više nije važeća. Odjavi se i prijavi ponovo.",
+          401,
+        );
       let detail = data?.detail;
       throw new ApiError(
         Array.isArray(detail)

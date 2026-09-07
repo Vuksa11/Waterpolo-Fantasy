@@ -11,6 +11,8 @@ fixture_script = "import {demoDraft,demoPlayers,demoMatches,demoStandings} from 
 f=json.loads(subprocess.check_output(['node','--input-type=module','-e',fixture_script],cwd=root))
 d=f['demoDraft'];state={'saved':None,'created':False,'requests':[],'transferkeys':[],'failtransfer':True}
 roster=[dict(entity_type='PLAYER',entity_id=p['id'],name=p['name'],position=p['position'],real_club=p['real_club'],current_cost=p['current_cost'],purchase_price=p['current_cost']) for p in d['roster']]
+roster[0]['position_verified']=False
+f['demoPlayers'][0]['position_verified']=False
 roster.append(dict(entity_type='COACH',entity_id='coach',name='Test trener',position=None,real_club='Test',current_cost=7,purchase_price=7))
 team=dict(id='team1',competition_id='league',name='Test tim',credit_balance=10.5,version=0,roster=roster)
 day=dict(id='day',label='Final',number=9300,status='UPCOMING',deadline='2030-01-01T12:00:00Z')
@@ -62,7 +64,9 @@ with sync_playwright() as p:
  page.locator('.mobile-team-action button').click();page.wait_for_timeout(400)
  assert state['created'] and state['saved'];assert 'sačuvan' in page.locator('#toast').inner_text()
  page.reload(wait_until='networkidle');assert page.locator('.pool-player.filled').count()==7
+ page.get_by_text('Privremeno dodeljene pozicije:',exact=False).first.wait_for(state='attached')
  page.locator('nav [data-go="players"]').click();page.wait_for_timeout(200)
+ assert page.get_by_text('Privremena pozicija',exact=True).count()==1
  page.locator('[data-buy="13"]').click();page.locator('#outgoing').select_option('12');page.locator('#transfer-form button').click();page.wait_for_timeout(200)
  assert 'Ishod' in page.locator('#transfer-error').inner_text()
  page.locator('#transfer-form button').click();page.wait_for_timeout(200)
