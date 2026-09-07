@@ -13,7 +13,25 @@ test so the next one creates fresh connections on whatever loop it runs on
 behavior.
 """
 
+from urllib.parse import urlsplit, urlunsplit
+
 import pytest_asyncio
+
+from app.core.config import settings
+
+# An independent review (Codex, problemV16) correctly pointed out that the
+# per-test `ratelimit:*` wipe below scans and deletes keys on WHATEVER Redis
+# database REDIS_URL points to -- if a developer runs pytest with the same
+# .env their real dev server uses (same host, same default db 0), this
+# deletes real rate-limit/lockout state for actual traffic, not just test
+# leftovers. Force the whole test session onto a dedicated logical Redis DB
+# (15, the conventional "scratch" index) instead, regardless of whatever db
+# number (if any) the configured REDIS_URL already has -- this can never
+# collide with a real deployment's traffic since nothing else in this
+# project is configured to use db 15.
+if settings.redis_url:
+    _parts = urlsplit(settings.redis_url)
+    settings.redis_url = urlunsplit((_parts.scheme, _parts.netloc, "/15", _parts.query, _parts.fragment))
 
 
 @pytest_asyncio.fixture(autouse=True)

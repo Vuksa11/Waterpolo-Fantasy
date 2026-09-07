@@ -102,7 +102,7 @@ async def team_fixture(db_session, client):
 def _token_for(user_id: uuid.UUID) -> str:
     from app.core.security import create_access_token
 
-    return create_access_token(user_id)
+    return create_access_token(user_id, 0)
 
 
 async def _clear_leaderboard_cache(competition_id: uuid.UUID, limit: int = 50, offset: int = 0) -> None:

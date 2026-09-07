@@ -119,16 +119,29 @@ async def enforce_rate_limit(key: str, limit: int, window_seconds: int) -> None:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many requests. Try again later.", headers=headers)
 
 
-async def check_lockout(key: str, limit: int) -> None:
-    """Read-only check -- does NOT increment. Raises 429 if `key` already
-    has `limit` or more recorded failures. Call before doing any expensive
-    work (like bcrypt verification) so a locked-out account fails fast."""
+async def check_lockout(key: str, limit: int, window_seconds: int) -> None:
+    """Does not increment the failure counter, but CAN self-heal it (see
+    below) -- call before doing any expensive work (like bcrypt
+    verification) so a locked-out account fails fast.
+
+    `window_seconds` exists only for that self-heal, not to change what
+    counts as "locked out" here: an independent review (Codex, problemV16)
+    found that `_increment_with_ttl`'s self-heal (see its docstring) never
+    actually runs for an account that's ALREADY at or over `limit` with a
+    damaged (TTL -1) counter, because this function is checked first and is
+    read-only -- it would keep returning 429 forever with no path back to
+    the code that heals it. Reproduced with fakeredis: a counter manually
+    set to 5 with no TTL stayed locked out and at TTL -1 indefinitely.
+    """
     client = _get_client()
     if client is None:
         return
     try:
         raw = await client.get(key)
         ttl = await client.ttl(key) if raw is not None else None
+        if raw is not None and ttl == -1:
+            await client.expire(key, window_seconds)
+            ttl = window_seconds
     except Exception:
         logger.warning("Lockout check failed for key %r -- failing open", key, exc_info=True)
         return

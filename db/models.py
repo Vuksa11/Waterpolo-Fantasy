@@ -127,6 +127,15 @@ class User(Base):
     password_reset_token: Mapped[str | None] = mapped_column(String, unique=True)
     password_reset_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Embedded in every issued JWT as "cv" and checked on every request (see
+    # deps.get_current_user). Bumped by a successful password reset so that
+    # any token issued before the reset -- on this device or any other --
+    # stops working immediately instead of remaining valid until its normal
+    # 7-day expiry. Found missing by an independent review (Codex,
+    # problemV16): resetting a compromised password did not invalidate
+    # tokens an attacker already held.
+    credentials_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
 
 class Competition(Base):
     """One of the three real-world leagues: Regionalna liga, Super liga Srbije, Prva liga Srbije."""
@@ -210,6 +219,15 @@ class Player(Base):
     # the match page (see player_resolver.py) — a field player's is always
     # populated at creation time; a goalkeeper's is filled in once resolved.
     position: Mapped[Position | None] = mapped_column(Enum(Position, name="player_position"))
+    # Meaningless while position is NULL. True means the position came from a
+    # real source (the user's own manual review of the roster); False means
+    # it's a placeholder guess made only to balance a club's position counts
+    # (currently: Cattaro's 23 players, which had zero real position data --
+    # see scripts/backfill_positions_and_coaches.py). An independent review
+    # (Codex, problemV17) correctly pointed out the API had no way to tell
+    # these apart, so "348 players have a position" silently overstated how
+    # much of that was actually verified.
+    position_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     real_club: Mapped[str] = mapped_column(String, nullable=False)
     current_cost: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=7)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)

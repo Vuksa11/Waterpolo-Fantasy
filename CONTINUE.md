@@ -445,6 +445,10 @@ to the DB:
   the goalkeeper-stable-ID note below), and 2 (`Samuil Tsvetanov Ivanov` at
   Radnički, `Nemanja Ilić` at Nais Niš) were left without a position
   annotation by the user in the source file — not guessed, flagged instead.
+  **Superseded below** (see "problemV17.md" section further down): 18 more
+  players lost their position after a duplicate-identity correction, and
+  the whole thing was rewritten as a committed, reproducible script — 330,
+  not 348, is the current real count.
 - **Cattaro** (23 players) had zero position annotations in the source
   file. Per the user's explicit instruction, positions were assigned by
   hand to mirror the position mix of the other 16 clubs (roughly OT 57%,
@@ -542,9 +546,17 @@ to the DB:
   clubs) — confirmed it does not; the whole "coach names" search had to be
   general web research for this reason.
 - Full test suite re-run after applying: 42 passed, 0 failed.
-- Unblocks: `save_lineup`'s formation validation and the frontend
-  team-builder's "Nedostaje potvrđena pozicija" disabled state now have
-  real data to work against for 348/352 players.
+- `save_lineup`'s formation validation and the frontend team-builder's
+  "Nedostaje potvrđena pozicija" disabled state now have real position data
+  to check against for most players. **Correction (an independent review,
+  Codex, problemV17, correctly pushed back on this):** this is not the same
+  as "the real team-builder flow is unblocked end-to-end" -- confirmed live
+  that both competitions currently have 0 matchdays with status UPCOMING,
+  and `check_window` in `app/routers/teams.py` correctly rejects any
+  lineup/transfer without one, regardless of position data. Position data
+  existing removes one blocker, not the only one; an actual end-to-end
+  check needs a fixture with a real future deadline, not the historical
+  matchdays currently in this dataset.
 
 - **Goalkeeper stable IDs** — field players get a stable external id
   straight from the box score; goalkeepers don't (confirmed, not a bug).
@@ -691,6 +703,165 @@ NOT done from either review: team-level fantasy scoring aggregation (the
 biggest product-completeness gap, still blocked on players.position for
 the "real" version), crash-recovery for a fully-dead idempotency claim,
 and a `(user_id, league_id)` unique constraint on fantasy_teams.
+
+## problemV16.md (Codex) -- all 6 findings fixed, same discipline as before (2026-09-07)
+
+Codex reviewed everything up to commit `4574f65` and wrote
+`Problems/problemV16.md` (6 findings: 3 P1 security, 2 P2, 1 P1-for-tests).
+Same standing practice as every prior round: each was independently
+verified (either by reading the actual code path, or reproducing it live
+through the real app) before being fixed, not trusted on word.
+
+1. **Reset-password race (P1)** — `reset_password` read the token with a
+   plain `SELECT`, no locking. Two concurrent requests carrying the same
+   still-valid token could both read it as valid before either committed,
+   both successfully set a (different) new password, with no error to
+   either caller. Fixed with `select(User)...with_for_update()`: the lock
+   is held from the read through the commit (including the slow bcrypt
+   hash — same tradeoff as `create_team`'s Season lock), and the token is
+   cleared on the SAME row before the hash runs. A concurrent request
+   blocks on the lock, then Postgres re-checks its WHERE clause against the
+   now-committed (token now NULL) row before granting it, so it correctly
+   finds no match instead of proceeding. Verified with a real test hitting
+   the actual endpoint through the ASGI app against the real dev Postgres
+   DB with two genuinely concurrent requests via `asyncio.gather`
+   (`test_reset_password_race_only_one_concurrent_request_succeeds`) — not
+   just an isolated reproduction of the query.
+2. **Reset doesn't invalidate old JWTs (P1)** — a token issued before a
+   password reset kept working normally until its own 7-day expiry, even
+   though the reset was presumably a response to a suspected compromise.
+   Fixed with a new `users.credentials_version` column (migration
+   `09f392236159`), embedded in every JWT as `"cv"` and checked against the
+   user's current value on every request (`app/deps.py`); a successful
+   reset increments it, invalidating every previously-issued token
+   everywhere at once. Verified with a real test: token obtained before
+   reset gets 401 on `/api/auth/me` immediately after, a token obtained
+   after the reset works normally
+   (`test_reset_password_invalidates_previously_issued_tokens`).
+3. **Email tokens logged unconditionally outside development (P1)** —
+   `send_email` logged the full body (which carries a live verification or
+   reset token) regardless of environment. Fixed: full body only logs when
+   `settings.environment == "development"`; everywhere else, only a
+   token-free notice is logged. The underlying limitation (no real email
+   provider) is unchanged and still honestly surfaced — this only stops
+   the token itself from ending up in a shared/persisted log sink.
+4. **Cache fallback doesn't actually dedupe without Redis, and its lock
+   dict never shrinks (P2)** — the previous per-key-`asyncio.Lock` version
+   of `get_or_compute_json` only serialized concurrent callers for the same
+   key; it never shared the *result*, so with caching disabled (no Redis,
+   or Redis down) 25 concurrent callers still ran `compute()` 25 times,
+   just one at a time instead of in parallel -- confirmed independently by
+   Codex (263ms for a ~10ms compute) before I fixed it. The lock dict also
+   never removed entries, growing without bound across the real key space
+   (confirmed: 200 unique keys left 201 dead locks). Rewrote it around a
+   single shared in-flight `asyncio.Task` per key instead of a lock: every
+   concurrent caller awaits the SAME task, and the entry is removed the
+   moment it finishes (success or failure) — fixes both problems in one
+   change. Verified with 3 tests: the original 25-concurrent-with-Redis
+   case still works, a new 25-concurrent-*without*-Redis case (the actual
+   regression) now also computes exactly once
+   (`test_concurrent_misses_compute_once_even_without_redis`), and a
+   200-unique-key test confirms the dict is empty once every call has
+   finished (`test_inflight_dict_does_not_grow_unbounded`).
+5. **Legacy lockout counters missing a TTL stay locked out forever (P2)** —
+   `_increment_with_ttl`'s self-heal (added in the problemV15 round) only
+   runs on an *increment*, but `login` calls the read-only `check_lockout`
+   FIRST — so an account already at/over the limit with a damaged (TTL -1)
+   counter returns 429 forever with no code path that ever reaches the
+   healing logic. Reproduced with fakeredis (a counter manually set to 5
+   with no TTL stayed at TTL -1 and locked out indefinitely) before fixing:
+   `check_lockout` now self-heals a missing TTL itself, given the same
+   `window_seconds` `record_failed_attempt` uses
+   (`test_check_lockout_self_heals_legacy_counter_without_ttl`).
+6. **Test suite wipes `ratelimit:*` on WHATEVER Redis DB is configured,
+   including a real shared one (P1 for the test environment)** — the
+   autouse fixture in `conftest.py` scans and deletes every `ratelimit:*`
+   key before each test on whatever `REDIS_URL` resolves to; running pytest
+   with the same `.env` a real dev/prod server uses would delete real
+   rate-limit/lockout state, not just test leftovers. Fixed by forcing the
+   whole test session onto a dedicated logical Redis DB (15) regardless of
+   whatever db number the configured URL already has — done once at
+   `conftest.py` import time by rewriting `settings.redis_url`'s path.
+   Verified manually: ran the lockout test with `REDIS_URL` pointing at the
+   normal dev Redis, confirmed keys landed on db 15
+   (`redis-cli -n 15 keys ratelimit:*` showed them) while db 0 stayed at
+   `dbsize` 0 throughout the entire suite, both before and after.
+
+Full suite: 47 passed (was 42; +5 new tests for these fixes), both with and
+without `REDIS_URL` set (45 passed + 2 skipped without it, matching the 2
+`requires_redis`-marked lockout tests).
+
+Not addressed by this round, called out in problemV16.md itself as still
+open (nothing new here, same items already tracked elsewhere in this file):
+CI still skips 6 integration tests needing real roster data; logging isn't
+an alerting system; team-level scoring aggregation, idempotency
+crash-recovery, and the `(user_id, league_id)` unique constraint remain
+open.
+
+## problemV17.md (Codex) -- reproducible backfill + duplicate-identity fix (2026-09-07)
+
+Codex reviewed the two documentation-only commits after problemV16
+(`ccb30e3`, `180009a`) and correctly pointed out they were exactly that --
+docs only, no application code, so none of problemV16's 6 findings were
+actually fixed by them (they've since been fixed, see the section above,
+same session). Two NEW findings in this review, both real and both fixed:
+
+1. **The position/coach backfill wasn't reproducible from the repo (P1)** —
+   `git diff --stat` between those commits showed only `CONTINUE.md` and
+   the handoff doc; the actual backfill was done via throwaway scripts in
+   `/tmp`, never committed. A fresh checkout + migration could not
+   reproduce the 348 positioned players or the 13 real coach names at all.
+   Fixed: `scripts/backfill_positions_and_coaches.py` is now a real,
+   committed, idempotent script — the source file itself
+   (`scripts/data/rosteri2.0.txt`, the user's manually-reviewed roster
+   export) is also committed, so the whole thing re-derives from the repo,
+   not from memory of what I ran in a scratch directory. Matches by
+   `(real_club, name)`, not local UUIDs (which wouldn't exist in a fresh
+   DB). Verified idempotent: ran it twice, identical output both times
+   (`Position updates: 328` both runs).
+2. **Placeholder positions were indistinguishable from real ones in the API
+   (P2)** — `PlayerOut` returned only `position`, with no way to tell
+   Cattaro's 23 hand-guessed placeholder positions apart from the 348 the
+   user actually reviewed; both the docs and (per Codex) the frontend's own
+   copy were calling all of them "confirmed." Fixed: new
+   `players.position_verified` column (migration `feaae23bb208`, default
+   `true`), set to `false` only for Cattaro's 23 rows, exposed on
+   `PlayerOut`. Formation validation in `save_lineup` still accepts any
+   non-null position regardless of this flag (a placeholder position is
+   still a position for gameplay purposes) — this is purely a
+   provenance/UI signal, not a new gameplay gate; the frontend is
+   responsible for whatever visual distinction it wants to make with it.
+
+**A third finding, not new but re-surfaced with a sharper edge** ("nije
+potvrđen duplikat identiteta" -- duplicate identity not confirmed): Codex
+cautioned that applying one position to both rows of a 24 shared-name pairs
+doesn't prove they're the same person, and warned against any automatic
+merge. Investigating this surfaced something worth fixing on its own
+merits, not just addressing the caution: **all 24 pairs turned out to have
+exactly one row WITH a stable `external_id` and one row WITHOUT** — this
+matches the scraper's own long-documented, independently-verified behavior
+that goalkeepers never get a stable id (`scraper/player_resolver.py`),
+while field players always do. The original backfill's "same position for
+both" approach therefore likely mislabeled several real field players as
+goalkeepers (whenever the source file's only data point for a shared name
+was "GK"). `backfill_positions_and_coaches.py` now treats the
+no-`external_id` row as the goalkeeper unconditionally, and applies the
+file's given position to the `external_id` row only when that value isn't
+itself "GK" (18 of the 24 pairs' field-player rows lost their position as a
+result — from `GK`, wrongly, to `NULL`, honestly; 5 pairs kept a real
+non-GK position on the field-player row; a 24th pair, Valis Vega's "Veljko
+Babić"/"Veljko Babic", has BOTH rows with an external_id — doesn't fit this
+shape at all, so the script correctly leaves it untouched rather than
+guessing). Net effect: positioned-player count dropped from 348 to 330,
+which is the correct direction — honest is better than complete here.
+**Not a merge**: both rows of every pair still exist as distinct catalog
+entries; whether any of these 24 pairs are actually the same real person
+(vs. two different people who happen to share a name) is still genuinely
+unresolved and would need real identity verification (match history,
+external site cross-reference) before anyone should act on it further.
+
+Full suite still 47 passed after this. `scripts/data/rosteri2.0.txt` and
+`scripts/backfill_positions_and_coaches.py` are both new, committed files.
 
 ## Suggested next steps, roughly in order
 

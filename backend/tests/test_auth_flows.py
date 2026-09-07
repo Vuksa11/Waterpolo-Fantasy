@@ -12,6 +12,7 @@ configured; the email-verification/password-reset tests don't depend on
 Redis at all and always run.
 """
 
+import asyncio
 import uuid
 
 import pytest
@@ -120,6 +121,66 @@ async def test_password_reset_flow(client, db_session, registered_user):
 async def test_reset_password_rejects_unknown_token(client):
     resp = await client.post("/api/auth/reset-password", json={"token": "not-a-real-token", "new_password": "x" * 10})
     assert resp.status_code == 422
+
+
+async def test_reset_password_invalidates_previously_issued_tokens(client, db_session, registered_user):
+    """An independent review (Codex, problemV16) found that resetting a
+    password didn't invalidate tokens already issued -- a token obtained
+    before the reset (e.g. by an attacker who had the old password) kept
+    working normally until its own 7-day expiry, defeating the point of a
+    reset in response to a suspected compromise."""
+    old_token = registered_user["token"]
+
+    await client.post("/api/auth/forgot-password", json={"email": registered_user["email"]})
+    user = await db_session.scalar(select(User).where(User.email == registered_user["email"]))
+    resp = await client.post(
+        "/api/auth/reset-password", json={"token": user.password_reset_token, "new_password": "brandnewpass456"}
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {old_token}"})
+    assert resp.status_code == 401, "a token issued before the password reset must stop working immediately"
+
+    new_login = await client.post(
+        "/api/auth/login", json={"email": registered_user["email"], "password": "brandnewpass456"}
+    )
+    assert new_login.status_code == 200
+    new_token = new_login.json()["access_token"]
+    resp = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {new_token}"})
+    assert resp.status_code == 200, "a token issued AFTER the reset must work normally"
+
+
+async def test_reset_password_race_only_one_concurrent_request_succeeds(client, db_session, registered_user):
+    """An independent review (Codex, problemV16) found and reproduced (in
+    isolation) that reset_password had no protection against two concurrent
+    requests racing on the same still-valid token -- both could read it as
+    valid and both successfully set a (different) new password, with no
+    error to either caller. This test exercises the real endpoint, through
+    the real ASGI app, against the real dev Postgres DB, with two genuinely
+    concurrent requests -- not an isolated reproduction of just the query."""
+    await client.post("/api/auth/forgot-password", json={"email": registered_user["email"]})
+    user = await db_session.scalar(select(User).where(User.email == registered_user["email"]))
+    token = user.password_reset_token
+    assert token is not None
+
+    responses = await asyncio.gather(
+        client.post("/api/auth/reset-password", json={"token": token, "new_password": "racepassword1"}),
+        client.post("/api/auth/reset-password", json={"token": token, "new_password": "racepassword2"}),
+    )
+    statuses = sorted(r.status_code for r in responses)
+    assert statuses == [200, 422], (
+        f"exactly one concurrent request with the same token should succeed and the other rejected "
+        f"as an already-used token, got {[r.status_code for r in responses]}"
+    )
+
+    # Whichever password won, exactly one of the two logs in -- never both,
+    # never neither.
+    login_attempts = await asyncio.gather(
+        client.post("/api/auth/login", json={"email": registered_user["email"], "password": "racepassword1"}),
+        client.post("/api/auth/login", json={"email": registered_user["email"], "password": "racepassword2"}),
+    )
+    login_statuses = sorted(r.status_code for r in login_attempts)
+    assert login_statuses == [200, 401]
 
 
 @requires_redis

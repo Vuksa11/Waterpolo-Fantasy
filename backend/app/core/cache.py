@@ -29,12 +29,17 @@ _client = None
 _client_initialized = False
 
 # Deduplicates concurrent cache misses for the SAME key within this process
-# (see get_or_compute_json). Entries are never removed -- unbounded growth
-# risk if the key space were huge, but it isn't here (a few dozen distinct
-# routes/param combinations, not per-user keys) -- acceptable, revisit if
-# that changes. Doesn't help across multiple worker processes; each has its
-# own dict, so a multi-worker deployment still sees per-process stampedes.
-_compute_locks: dict[str, asyncio.Lock] = {}
+# (see get_or_compute_json): every concurrent caller for a key currently
+# being computed awaits the SAME in-flight task instead of starting its own,
+# and the entry is removed the moment that computation finishes -- so this
+# dict only ever holds keys that are ACTIVELY being computed right now, not
+# every key ever seen (an independent review, Codex problemV16, correctly
+# pointed out the previous per-key-Lock version never removed entries,
+# growing without bound across the real key space -- confirmed with 200
+# unique keys leaving 201 dead locks behind). Doesn't help across multiple
+# worker processes; each has its own dict, so a multi-worker deployment
+# still sees per-process stampedes.
+_inflight: dict[str, "asyncio.Task[Any]"] = {}
 
 
 def make_cache_key(prefix: str, **params: Any) -> str:
@@ -124,22 +129,37 @@ async def get_or_compute_json(
     from Pydantic models with `.model_dump(mode="json")`, not the models
     themselves).
 
-    Concurrent misses for the SAME key are deduplicated within this process
-    (an independent review found 25 concurrent misses ran `compute()` 25
-    times without this) -- the first caller does the real work under a
-    per-key lock; everyone else waiting on that lock re-checks the cache
-    first (the first caller likely just populated it) before ever calling
-    compute() themselves.
+    Concurrent misses for the SAME key are deduplicated within this process:
+    the first caller starts a single `compute()` task and every other
+    concurrent caller for that key awaits that SAME task instead of running
+    their own. This matters even without Redis configured at all -- a
+    per-key `asyncio.Lock` version of this (the original fix for an
+    independent review's 25-concurrent-callers-run-compute-25-times finding)
+    only serialized those calls without sharing the result, so with caching
+    disabled it still ran `compute()` once per waiter, just one at a time
+    instead of in parallel (a second independent review, Codex problemV16,
+    caught this and reproduced it: 25 calls, `compute()` ran 25 times).
+    Sharing the actual in-flight task fixes both that and the previous
+    version's unbounded key growth (see `_inflight`'s comment) in one move.
     """
     cached = await cache_get_json(key)
     if cached is not None:
         return cached
 
-    lock = _compute_locks.setdefault(key, asyncio.Lock())
-    async with lock:
-        cached = await cache_get_json(key)
-        if cached is not None:
-            return cached
+    task = _inflight.get(key)
+    if task is None:
+        task = asyncio.ensure_future(_compute_and_cache(key, compute, ttl))
+        _inflight[key] = task
+    return await task
+
+
+async def _compute_and_cache(key: str, compute: Callable[[], Awaitable[Any]], ttl: int | None) -> Any:
+    try:
         value = await compute()
         await cache_set_json(key, value, ttl)
         return value
+    finally:
+        # Always remove, success or failure -- a failed compute must not
+        # leave the key permanently "in flight" with nobody left to clean it
+        # up, and a successful one has nothing left to dedupe once it's done.
+        _inflight.pop(key, None)
