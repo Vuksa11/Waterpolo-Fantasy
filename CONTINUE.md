@@ -490,7 +490,7 @@ to the DB:
     the user's file marked him "OT" — flagged, not silently overridden,
     since the user's manual position annotation was treated as the source of
     truth this round.
-  Still left as TBD after a genuinely thorough search (not guessed):
+  Still had no verifiable real name after a genuinely thorough search:
   - **Crvena Zvezda** — actively coachless per multiple 2026 news reports:
     coach Aleksandar Filipović left mid-season (too few players showing up
     to training), separate reports describe the club in serious financial
@@ -498,13 +498,20 @@ to the DB:
   - **Cattaro (VA Cattaro)** — a "new season" presentation names 4 people
     (Mlađan Tujković, Željko Vičević, Nebojša Milić, Ivan Bjelobrković) with
     no indication which one is the sole head coach — reads as a multi-coach
-    academy staff, not a single-name role. Left blank rather than pick one
-    at random.
+    academy staff, not a single-name role.
   - **Nais Niš** — every source found (several search phrasings tried) was
     stale (2015–2018) or silent on 2025/26.
   - **Stari Grad** — confirmed former coach Zoran Mijalkovski left for Novi
     Beograd (Feb 2026, total-waterpolo.com's own news post), but no
     successor was found anywhere.
+
+  Per the user's explicit follow-up request ("za preostale trenere uradi
+  mock za sad"), these 4 now carry a **fictional placeholder name, suffixed
+  `(mock)`** instead of the old "— trener TBD" text: Crvena Zvezda → Dušan
+  Marković (mock), Cattaro → Ivan Radulović (mock), Nais Niš → Vladimir
+  Antić (mock), Stari Grad → Dejan Simić (mock). These are made up, not
+  sourced from anything — swap them out the moment a real name is found or
+  supplied.
 - Investigated the two "- -" unresolved-name player rows (Primorac,
   Šabac Elixir) at the user's request, since the working assumption in this
   doc and in `player_resolver.py`'s docstring was that these were
@@ -522,7 +529,14 @@ to the DB:
   Premier. **Conclusion: this is a real data gap on totalwaterpolo.com
   itself** (the site never published these two young players' names), not a
   scraper bug and not something further searching can fix — left as `NULL`
-  name is already correct behavior, no code or data change needed. Also
+  name is already correct behavior, no code or data change needed.
+  Follow-up check the user asked for specifically: Šabac Elixir's actual
+  goalkeepers (jersey #1 "Darko Djurovic", jersey #13 "Veljko Tomić", both
+  visible in the same match's `#homeGoalkeepers` section) are **not**
+  missing — both already exist in the DB with the right name and `GK`
+  position. The "- -" row is a separate, unrelated player (jersey #16,
+  regular field-player section) — the goalkeepers were never the ones with
+  the gap. Also
   checked whether total-waterpolo.com exposes coach data anywhere (a
   `tw_team/{id}` profile page pattern exists and was tried for several
   clubs) — confirmed it does not; the whole "coach names" search had to be
